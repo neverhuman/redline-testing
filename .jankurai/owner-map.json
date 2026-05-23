@@ -1,0 +1,16 @@
+{
+  "owners": {
+    "runner": [
+      "Cargo.toml",
+      "Cargo.lock",
+      "src/**",
+      "corpus/**",
+      "README.md",
+      "justfile"
+    ],
+    "control-plane": [
+      "AGENTS.md",
+      ".jankurai/**"
+    ]
+  }
+}

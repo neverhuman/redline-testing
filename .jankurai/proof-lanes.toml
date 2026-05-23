@@ -1,0 +1,11 @@
+[lane.fast]
+commands = [
+  "rtk cargo fmt --check",
+  "rtk cargo check --locked",
+  "rtk cargo test --locked",
+]
+
+[lane.release-local]
+commands = [
+  "rtk just release-local",
+]

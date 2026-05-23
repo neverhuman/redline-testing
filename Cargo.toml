@@ -1,0 +1,13 @@
+[package]
+name = "redline-testing"
+version = "0.1.1"
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.95"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"

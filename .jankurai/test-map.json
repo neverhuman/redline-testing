@@ -1,0 +1,24 @@
+{
+  "tests": {
+    "src/": {
+      "command": "rtk cargo test --locked",
+      "purpose": "verify the runner logic and CLI contract"
+    },
+    "corpus/": {
+      "command": "rtk cargo test --locked",
+      "purpose": "verify the embedded SQLite parity manifest parses"
+    },
+    "Cargo.toml": {
+      "command": "rtk cargo check --locked",
+      "purpose": "verify dependency and crate metadata"
+    },
+    "justfile": {
+      "command": "rtk just release-local",
+      "purpose": "verify the local release tarball and checksum"
+    },
+    ".jankurai/": {
+      "command": "rtk cargo test --locked",
+      "purpose": "verify control-plane edits do not break runner tests"
+    }
+  }
+}

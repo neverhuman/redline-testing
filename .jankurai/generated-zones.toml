@@ -1,0 +1,17 @@
+[[zone]]
+path = "corpus/sqlite_parity/generated_manifest.json"
+read_only = true
+source = "Migrated from /home/ubuntu/redlineDB/crates/bench/sqlite_parity/generated_manifest.json"
+command = "copy from pinned RedlineDB parity corpus during split"
+
+[[zone]]
+path = "dist/redline-testing-0.1.0-linux-x86_64.tar.gz"
+read_only = false
+source = "local release package"
+command = "just release-local"
+
+[[zone]]
+path = "dist/redline-testing-0.1.0-linux-x86_64.tar.gz.sha256"
+read_only = false
+source = "local release checksum"
+command = "just release-local"
