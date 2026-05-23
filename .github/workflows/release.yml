@@ -19,6 +19,8 @@ jobs:
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install just
+        run: cargo install just --locked
       - name: Test
         run: |
           cargo fmt --check
