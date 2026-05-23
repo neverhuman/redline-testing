@@ -5,6 +5,7 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+use crate::beyond_sqlite;
 use crate::evidence::{self, EvidenceConfig};
 use crate::report::{self, JankuraiCompareOptions, ReportOptions, SentinelOptions};
 use crate::sqlite_parity;
@@ -149,6 +150,8 @@ enum Suite {
     SqliteParity,
     #[value(name = "memory")]
     Memory,
+    #[value(name = "beyond_sqlite", alias = "beyond-sqlite")]
+    BeyondSqlite,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -182,54 +185,186 @@ pub fn run(cli: Cli) -> Result<()> {
 fn run_suite(args: RunArgs) -> Result<()> {
     let workers = resolve_workers(&args.workers)?;
     validate_samples(args.repetitions, args.warmup)?;
-    prepare_output(&args.output)?;
     let tmp_root = resolve_tmp_root(&args.tmp_root)?;
     fs::create_dir_all(&tmp_root)
         .with_context(|| format!("create tmp root {}", tmp_root.display()))?;
     let sqlite_bin = resolve_sqlite_bin(&args.sqlite_bin);
-    let progress = progress_enabled(args.progress);
-    let started_unix_ms = evidence::now_unix_ms();
-    let command_line = std::env::args().collect::<Vec<_>>();
-    let memory_samples = args.memory_samples || matches!(args.suite, Suite::Memory);
 
-    let started = Instant::now();
+    match args.suite {
+        Suite::All => run_all_suites(&args, workers, tmp_root, sqlite_bin),
+        Suite::SqliteParity | Suite::Memory => {
+            prepare_output(&args.output)?;
+            let started = Instant::now();
+            let summary = run_sqlite_like_suite(
+                &args,
+                args.suite,
+                args.output.clone(),
+                workers,
+                tmp_root,
+                sqlite_bin,
+            )?;
+            if progress_enabled(args.progress) {
+                eprintln!(
+                    "redline-testing {} total={} passed={} failed={} skipped={} elapsed_ns={}",
+                    args.suite.as_str(),
+                    summary.total,
+                    summary.passed,
+                    summary.failed,
+                    summary.skipped,
+                    started.elapsed().as_nanos()
+                );
+            }
+            Ok(())
+        }
+        Suite::BeyondSqlite => {
+            prepare_output(&args.output)?;
+            let summary = run_beyond_sqlite_suite(&args, args.output.clone())?;
+            if progress_enabled(args.progress) {
+                eprintln!(
+                    "redline-testing beyond_sqlite total={} passed={} failed={} skipped={}",
+                    summary.total, summary.passed, summary.failed, summary.skipped
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
+fn run_all_suites(
+    args: &RunArgs,
+    workers: usize,
+    tmp_root: PathBuf,
+    sqlite_bin: PathBuf,
+) -> Result<()> {
+    let output_dir = args
+        .output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(output_dir).with_context(|| format!("create {}", output_dir.display()))?;
+    let sqlite_output = output_dir.join("sqlite_parity.raw.jsonl");
+    let memory_output = output_dir.join("memory.raw.jsonl");
+    let beyond_output = output_dir.join("beyond_sqlite.raw.jsonl");
+
+    prepare_output(&sqlite_output)?;
+    let sqlite_summary = run_sqlite_like_suite(
+        args,
+        Suite::SqliteParity,
+        sqlite_output.clone(),
+        workers,
+        tmp_root.clone(),
+        sqlite_bin.clone(),
+    )?;
+    prepare_output(&memory_output)?;
+    let memory_summary = run_sqlite_like_suite(
+        args,
+        Suite::Memory,
+        memory_output.clone(),
+        workers,
+        tmp_root,
+        sqlite_bin,
+    )?;
+    prepare_output(&beyond_output)?;
+    let beyond_summary = run_beyond_sqlite_suite(args, beyond_output.clone())?;
+
+    let mut combined = String::new();
+    for path in [&sqlite_output, &memory_output, &beyond_output] {
+        combined.push_str(
+            &fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?,
+        );
+    }
+    fs::write(&args.output, combined)
+        .with_context(|| format!("write {}", args.output.display()))?;
+    write_all_manifest(
+        output_dir,
+        &args.output,
+        [
+            ("sqlite_parity", sqlite_output.as_path(), sqlite_summary),
+            ("memory", memory_output.as_path(), memory_summary),
+            ("beyond_sqlite", beyond_output.as_path(), beyond_summary),
+        ],
+    )
+}
+
+fn run_sqlite_like_suite(
+    args: &RunArgs,
+    suite: Suite,
+    output: PathBuf,
+    workers: usize,
+    tmp_root: PathBuf,
+    sqlite_bin: PathBuf,
+) -> Result<sqlite_parity::RunSummary> {
+    let memory_samples = args.memory_samples || matches!(suite, Suite::Memory);
+    let started_unix_ms = evidence::now_unix_ms();
     let summary = sqlite_parity::run(sqlite_parity::RunConfig {
         reference_bin: sqlite_bin.clone(),
         target_bin: args.target_bin.clone(),
-        output: args.output.clone(),
+        output: output.clone(),
         tmp_root: tmp_root.clone(),
         workers,
         repetitions: args.repetitions,
         warmup: args.warmup,
-        progress,
+        progress: progress_enabled(args.progress),
         memory_samples,
     })?;
     evidence::write_sqlite_parity_evidence(EvidenceConfig {
-        suite: args.suite.as_str().to_owned(),
-        output: args.output,
-        target_bin: args.target_bin,
+        suite: suite.as_str().to_owned(),
+        output,
+        target_bin: args.target_bin.clone(),
         sqlite_bin,
         tmp_root,
         workers: workers.to_string(),
         repetitions: args.repetitions,
         warmup: args.warmup,
         memory_samples,
-        command_line,
+        command_line: std::env::args().collect::<Vec<_>>(),
         started_unix_ms,
         ended_unix_ms: evidence::now_unix_ms(),
         summary: summary.clone(),
     })?;
-    if progress {
-        eprintln!(
-            "redline-testing sqlite_parity total={} passed={} failed={} skipped={} elapsed_ns={}",
-            summary.total,
-            summary.passed,
-            summary.failed,
-            summary.skipped,
-            started.elapsed().as_nanos()
-        );
-    }
-    Ok(())
+    Ok(summary)
+}
+
+fn run_beyond_sqlite_suite(args: &RunArgs, output: PathBuf) -> Result<sqlite_parity::RunSummary> {
+    let started_unix_ms = evidence::now_unix_ms();
+    beyond_sqlite::run(beyond_sqlite::RunConfig {
+        target_bin: args.target_bin.clone(),
+        output,
+        command_line: std::env::args().collect::<Vec<_>>(),
+        started_unix_ms,
+        ended_unix_ms: evidence::now_unix_ms(),
+    })
+}
+
+fn write_all_manifest<'a>(
+    output_dir: &Path,
+    output: &Path,
+    summaries: impl IntoIterator<Item = (&'a str, &'a Path, sqlite_parity::RunSummary)>,
+) -> Result<()> {
+    let suites = summaries
+        .into_iter()
+        .map(|(suite, raw_path, summary)| {
+            serde_json::json!({
+                "suite": suite,
+                "raw": raw_path.display().to_string(),
+                "total": summary.total,
+                "passed": summary.passed,
+                "failed": summary.failed,
+                "skipped": summary.skipped
+            })
+        })
+        .collect::<Vec<_>>();
+    let manifest = serde_json::json!({
+        "schema_version": "redline-testing-all-manifest-v1",
+        "suite": "all",
+        "raw": output.display().to_string(),
+        "suites": suites
+    });
+    fs::write(
+        output_dir.join("all-manifest.json"),
+        format!("{}\n", serde_json::to_string_pretty(&manifest)?),
+    )
+    .with_context(|| format!("write {}", output_dir.join("all-manifest.json").display()))
 }
 
 fn report(args: ReportArgs) -> Result<()> {
@@ -255,9 +390,13 @@ fn report(args: ReportArgs) -> Result<()> {
 }
 
 fn list(args: ListArgs) -> Result<()> {
+    if matches!(args.suite, Suite::BeyondSqlite) {
+        return list_beyond_sqlite(args.format);
+    }
     let cases = sqlite_parity::all_cases()?;
     let selected = match args.suite {
         Suite::All | Suite::SqliteParity | Suite::Memory => cases,
+        Suite::BeyondSqlite => unreachable!("handled above"),
     };
     match args.format {
         ListFormat::Text => {
@@ -295,6 +434,42 @@ fn list(args: ListArgs) -> Result<()> {
     Ok(())
 }
 
+fn list_beyond_sqlite(format: ListFormat) -> Result<()> {
+    let features = beyond_sqlite::all_features()?;
+    match format {
+        ListFormat::Text => {
+            for feature in features {
+                println!(
+                    "BEYOND-{:03} {} {} {}",
+                    feature.rank,
+                    feature.status_string(),
+                    feature.proof_lane,
+                    feature.title
+                );
+            }
+        }
+        ListFormat::Markdown => {
+            println!("# Beyond-SQLite Feature Index\n");
+            println!("| ID | Status | Owner | Proof lane | Title |");
+            println!("| --- | --- | --- | --- | --- |");
+            for feature in features {
+                println!(
+                    "| BEYOND-{:03} | {} | {} | {} | {} |",
+                    feature.rank,
+                    feature.status_string(),
+                    feature.owner,
+                    feature.proof_lane,
+                    feature.title
+                );
+            }
+        }
+        ListFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&features)?);
+        }
+    }
+    Ok(())
+}
+
 fn jankurai_compare(args: JankuraiCompareArgs) -> Result<()> {
     report::jankurai_compare(JankuraiCompareOptions {
         redlinedb_score: args.redlinedb_score,
@@ -321,6 +496,16 @@ impl Suite {
             Self::All => "all",
             Self::SqliteParity => "sqlite_parity",
             Self::Memory => "memory",
+            Self::BeyondSqlite => "beyond_sqlite",
+        }
+    }
+}
+
+impl beyond_sqlite::Feature {
+    fn status_string(&self) -> &'static str {
+        match self.status {
+            beyond_sqlite::FeatureStatus::ManifestBacklog => "manifest_backlog",
+            beyond_sqlite::FeatureStatus::PassingReference => "passing_reference",
         }
     }
 }

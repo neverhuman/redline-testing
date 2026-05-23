@@ -246,12 +246,13 @@ pub fn generate(options: ReportOptions) -> Result<()> {
     }
 
     let output_dir = &options.out_dir;
-    let raw_out = output_dir.join("raw.jsonl");
-    let ranked_out = output_dir.join("ranked.csv");
-    let ksloc_out = output_dir.join("ksloc.csv");
-    let summary_out = output_dir.join("summary.json");
-    let manifest_out = output_dir.join("manifest.json");
-    let provenance_out = output_dir.join("provenance.json");
+    let artifact_names = artifact_names_for_suite(&options.suite);
+    let raw_out = output_dir.join(artifact_names.raw);
+    let ranked_out = output_dir.join(artifact_names.ranked);
+    let ksloc_out = output_dir.join(artifact_names.ksloc);
+    let summary_out = output_dir.join(artifact_names.summary);
+    let manifest_out = output_dir.join(artifact_names.manifest);
+    let provenance_out = output_dir.join(artifact_names.provenance);
 
     let redline_testing_bin = std::env::current_exe().context("resolve current executable")?;
     let redline_testing_binary_sha256 = sha256_file(&redline_testing_bin)?;
@@ -271,10 +272,10 @@ pub fn generate(options: ReportOptions) -> Result<()> {
     let sqlite_version =
         capture_version(&sqlite_binary_path).unwrap_or_else(|_| "<unknown>".to_owned());
     let output_file_hashes = BTreeMap::from([
-        ("raw.jsonl".to_owned(), sha256_hex(&raw_text)),
-        ("summary.json".to_owned(), sha256_hex(&summary_json)),
-        ("ranked.csv".to_owned(), sha256_hex(&ranked_csv)),
-        ("ksloc.csv".to_owned(), sha256_hex(&ksloc_csv)),
+        (artifact_names.raw.to_owned(), sha256_hex(&raw_text)),
+        (artifact_names.summary.to_owned(), sha256_hex(&summary_json)),
+        (artifact_names.ranked.to_owned(), sha256_hex(&ranked_csv)),
+        (artifact_names.ksloc.to_owned(), sha256_hex(&ksloc_csv)),
         (options.readme.display().to_string(), sha256_hex(&readme)),
     ]);
     let command_line = normalized_command_line();
@@ -395,6 +396,44 @@ pub fn generate(options: ReportOptions) -> Result<()> {
     }
 
     Ok(())
+}
+
+struct ArtifactNames {
+    raw: &'static str,
+    ranked: &'static str,
+    ksloc: &'static str,
+    summary: &'static str,
+    manifest: &'static str,
+    provenance: &'static str,
+}
+
+fn artifact_names_for_suite(suite: &str) -> ArtifactNames {
+    match suite {
+        "memory" => ArtifactNames {
+            raw: "memory.raw.jsonl",
+            ranked: "memory-ranked.csv",
+            ksloc: "memory-ksloc.csv",
+            summary: "memory-summary.json",
+            manifest: "memory-manifest.json",
+            provenance: "memory-provenance.json",
+        },
+        "beyond_sqlite" => ArtifactNames {
+            raw: "beyond_sqlite.raw.jsonl",
+            ranked: "beyond-sqlite-ranked.csv",
+            ksloc: "beyond-sqlite-ksloc.csv",
+            summary: "beyond-sqlite-summary.json",
+            manifest: "beyond-sqlite-manifest.json",
+            provenance: "beyond-sqlite-provenance.json",
+        },
+        _ => ArtifactNames {
+            raw: "raw.jsonl",
+            ranked: "ranked.csv",
+            ksloc: "ksloc.csv",
+            summary: "summary.json",
+            manifest: "manifest.json",
+            provenance: "provenance.json",
+        },
+    }
 }
 
 pub fn jankurai_compare(options: JankuraiCompareOptions) -> Result<()> {

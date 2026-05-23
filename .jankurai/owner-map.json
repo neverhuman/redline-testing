@@ -3,8 +3,12 @@
     "runner": [
       "Cargo.toml",
       "Cargo.lock",
+      ".github/**",
       "src/**",
       "corpus/**",
+      "metadata/**",
+      "schemas/**",
+      "templates/**",
       "README.md",
       "justfile"
     ],

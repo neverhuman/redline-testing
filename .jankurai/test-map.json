@@ -8,6 +8,14 @@
       "command": "rtk cargo test --locked",
       "purpose": "verify the embedded SQLite parity manifest parses"
     },
+    "metadata/": {
+      "command": "rtk cargo test --locked",
+      "purpose": "verify the packaged beyond-SQLite metadata parses"
+    },
+    ".github/": {
+      "command": "rtk just release-local",
+      "purpose": "verify the release workflow package contract still builds locally"
+    },
     "Cargo.toml": {
       "command": "rtk cargo check --locked",
       "purpose": "verify dependency and crate metadata"

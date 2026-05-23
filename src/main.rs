@@ -1,3 +1,4 @@
+mod beyond_sqlite;
 mod cli;
 mod evidence;
 mod report;

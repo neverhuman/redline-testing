@@ -1,0 +1,47 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test
+        run: |
+          cargo fmt --check
+          cargo check --locked
+          cargo test --locked
+      - name: Build package
+        run: just release-local
+      - name: Attest package
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/redline-testing-*-linux-x86_64.tar.gz
+            dist/redline-testing-*-linux-x86_64.tar.gz.sha256
+            dist/release-manifest.json
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME:-manual}"
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$tag" \
+            --notes "redline-testing ${tag}" \
+            dist/redline-testing-*-linux-x86_64.tar.gz \
+            dist/redline-testing-*-linux-x86_64.tar.gz.sha256 \
+            dist/release-manifest.json

@@ -4,7 +4,7 @@ Official conformance, benchmark, and report harness for RedlineDB.
 
 This repository publishes the pinned external runner artifact consumed by
 RedlineDB CI. The current implemented suites are `sqlite_parity`, `memory`,
-and `all`; `all` runs every implemented suite in this release.
+`beyond_sqlite`, and `all`; `all` runs every implemented suite in this release.
 
 ## Run
 
@@ -40,6 +40,17 @@ When `--memory-samples` is set on Linux, records may also include best-effort
 RSS fields such as `memory_status`, `reference_peak_rss_kb`, and
 `target_peak_rss_kb`.
 
+`memory` is a separate official suite. It uses the same parity corpus with
+Linux `/proc` sampling enabled and writes `memory.raw.jsonl`,
+`memory-summary.json`, `memory-ranked.csv`, `memory-manifest.json`, and
+`memory-provenance.json`. If `/proc` sampling is unavailable, correctness can
+still pass and records report `memory_status: unavailable`.
+
+`beyond_sqlite` packages the beyond-SQLite feature backlog and emits per-feature
+coverage evidence. Features with promoted reference coverage are marked passed;
+manifest-only backlog features are explicit skips until RedlineDB accepts an
+executable contract.
+
 ## Release
 
 ```bash
@@ -54,4 +65,11 @@ This builds `target/release/redline-testing`, writes
 bin/redline-testing
 release-manifest.json
 corpus/sqlite_parity/generated_manifest.json
+metadata/beyond_sqlite/features.json
+schemas/*.json
+templates/*.md
 ```
+
+Tagged GitHub releases are built by `.github/workflows/release.yml`, publish the
+tarball plus `.sha256`, and request GitHub artifact attestations for the release
+assets.

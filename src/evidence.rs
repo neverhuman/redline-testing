@@ -127,10 +127,10 @@ pub fn write_sqlite_parity_evidence(config: EvidenceConfig) -> Result<()> {
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    let summary_path = output_dir.join("summary.json");
-    let ranked_path = output_dir.join("ranked.csv");
-    let manifest_path = output_dir.join("manifest.json");
-    let provenance_path = output_dir.join("provenance.json");
+    let summary_path = output_dir.join(suite_artifact_name(&config.suite, "summary.json"));
+    let ranked_path = output_dir.join(suite_artifact_name(&config.suite, "ranked.csv"));
+    let manifest_path = output_dir.join(suite_artifact_name(&config.suite, "manifest.json"));
+    let provenance_path = output_dir.join(suite_artifact_name(&config.suite, "provenance.json"));
 
     let summary_json = serde_json::to_string_pretty(&SummaryJson {
         suite: config.suite.clone(),
@@ -180,12 +180,13 @@ pub fn write_sqlite_parity_evidence(config: EvidenceConfig) -> Result<()> {
     let release_binary_sha256 = env_sha("CI_REDLINE_TESTING_RELEASE_BINARY_SHA256")
         .or_else(|| env_sha("CI_REDLINE_TESTING_BIN_SHA256"))
         .unwrap_or_else(|| redline_testing_binary_sha256.clone());
+    let raw_hash = sha256_file(&config.output)?;
     let output_hashes = BTreeMap::from([
-        ("raw.jsonl".to_owned(), sha256_file(&config.output)?),
-        (display_path(&config.output), sha256_file(&config.output)?),
-        ("summary.json".to_owned(), sha256_file(&summary_path)?),
-        ("ranked.csv".to_owned(), sha256_file(&ranked_path)?),
-        ("manifest.json".to_owned(), sha256_file(&manifest_path)?),
+        (file_name(&config.output), raw_hash.clone()),
+        (display_path(&config.output), raw_hash),
+        (file_name(&summary_path), sha256_file(&summary_path)?),
+        (file_name(&ranked_path), sha256_file(&ranked_path)?),
+        (file_name(&manifest_path), sha256_file(&manifest_path)?),
     ]);
     let provenance_json = serde_json::to_string_pretty(&ProvenanceJson {
         schema_version: "redline-testing-provenance-v1".to_owned(),
@@ -224,6 +225,21 @@ pub fn write_sqlite_parity_evidence(config: EvidenceConfig) -> Result<()> {
     fs::write(&provenance_path, provenance_json)
         .with_context(|| format!("write {}", provenance_path.display()))?;
     Ok(())
+}
+
+fn suite_artifact_name(suite: &str, base: &str) -> String {
+    match suite {
+        "sqlite_parity" | "all" => base.to_owned(),
+        "memory" => format!("memory-{base}"),
+        other => format!("{}-{base}", other.replace('_', "-")),
+    }
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| display_path(path))
 }
 
 pub fn now_unix_ms() -> u128 {
