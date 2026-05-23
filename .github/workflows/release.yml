@@ -19,6 +19,9 @@ jobs:
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.95.0
+          components: rustfmt
       - name: Install just
         run: cargo install just --locked
       - name: Test
