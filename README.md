@@ -4,7 +4,8 @@ Official conformance, benchmark, and report harness for RedlineDB.
 
 This repository publishes the pinned external runner artifact consumed by
 RedlineDB CI. The current implemented suites are `sqlite_parity`, `memory`,
-`beyond_sqlite`, and `all`; `all` runs every implemented suite in this release.
+`beyond_sqlite`, and `all`; `all` runs every implemented suite in this release
+and writes the hash-bound `official-evidence.json` bundle consumed by RedlineDB.
 
 ## Run
 
@@ -51,6 +52,31 @@ coverage evidence. Features with promoted reference coverage are marked passed;
 manifest-only backlog features are explicit skips until RedlineDB accepts an
 executable contract.
 
+`all` writes `all.jsonl`, `all-manifest.json`, every per-suite raw/summary/
+ranked/manifest/provenance artifact, and `official-evidence.json`. The official
+evidence JSON uses schema `redline-testing-official-evidence-v1`, records the
+runner, target, SQLite reference, per-suite totals, and SHA-256 hashes for the
+declared output files.
+
+## Report
+
+RedlineDB-facing report generation must be bound to official evidence:
+
+```bash
+redline-testing report \
+  --suite sqlite_parity \
+  --input raw.jsonl \
+  --official-evidence official-evidence.processed.json \
+  --out-dir benchmark-results/sqlite-parity/latest \
+  --readme README.md \
+  --updated-date 2026-05-24
+```
+
+`--official-evidence` accepts either raw `official-evidence.json` or RedlineDB's
+processed `official-evidence.processed.json` and verifies that the report input
+hash matches the official suite hash. Omit it only with `--local-diagnostics`
+for uncommitted local diagnostics.
+
 ## Release
 
 ```bash
@@ -58,7 +84,7 @@ just release-local
 ```
 
 This builds `target/release/redline-testing`, writes
-`dist/redline-testing-0.1.1-linux-x86_64.tar.gz`, and writes the matching
+`dist/redline-testing-0.1.2-linux-x86_64.tar.gz`, and writes the matching
 `.sha256` file. The tarball contains:
 
 ```text

@@ -18,6 +18,8 @@ const JANKURAI_BREAKDOWN_END: &str = "<!-- sqlite-jankurai-breakdown:end -->";
 pub struct ReportOptions {
     pub suite: String,
     pub input: PathBuf,
+    pub official_evidence: Option<PathBuf>,
+    pub local_diagnostics: bool,
     pub out_dir: PathBuf,
     pub readme: PathBuf,
     pub plot: Option<PathBuf>,
@@ -134,6 +136,14 @@ struct RankedCase {
 pub fn generate(options: ReportOptions) -> Result<()> {
     let raw_text = fs::read_to_string(&options.input)
         .with_context(|| format!("read raw input {}", options.input.display()))?;
+    if let Some(official_evidence) = &options.official_evidence {
+        validate_official_evidence_binding(official_evidence, &options.suite, &raw_text)?;
+    } else if !options.local_diagnostics {
+        bail!(
+            "redlineDB-facing report artifacts require --official-evidence; \
+             use --local-diagnostics only for uncommitted local diagnostics"
+        );
+    }
     let raw_records = parse_raw_records(&raw_text)?;
     if raw_records.is_empty() {
         bail!("sqlite parity report input is empty");
@@ -396,6 +406,147 @@ pub fn generate(options: ReportOptions) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn validate_official_evidence_binding(
+    official_evidence: &Path,
+    suite: &str,
+    raw_text: &str,
+) -> Result<()> {
+    let text = fs::read_to_string(official_evidence)
+        .with_context(|| format!("read official evidence {}", official_evidence.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .with_context(|| format!("parse official evidence {}", official_evidence.display()))?;
+    let actual_raw_sha256 = sha256_hex(raw_text);
+    let schema_version = value
+        .get("schema_version")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let expected_raw_sha256 = match schema_version {
+        "redline-testing-official-evidence-processed-v1" => processed_suite_raw_hash(&value, suite),
+        "redline-testing-official-evidence-v1" => raw_official_suite_hash(&value, suite),
+        other => bail!(
+            "unsupported official evidence schema_version {:?} in {}",
+            other,
+            official_evidence.display()
+        ),
+    }
+    .with_context(|| {
+        format!(
+            "resolve official evidence hash for suite {suite} from {}",
+            official_evidence.display()
+        )
+    })?;
+
+    if actual_raw_sha256 != expected_raw_sha256 {
+        bail!(
+            "official evidence raw SHA-256 mismatch for suite {}: expected {}, got {}",
+            suite,
+            expected_raw_sha256,
+            actual_raw_sha256
+        );
+    }
+    Ok(())
+}
+
+fn processed_suite_raw_hash(value: &serde_json::Value, suite: &str) -> Result<String> {
+    let suite_entry = value
+        .get("suite_summaries")
+        .and_then(|suite_summaries| suite_summaries.get(suite))
+        .ok_or_else(|| anyhow::anyhow!("processed evidence missing suite_summaries.{suite}"))?;
+    suite_entry
+        .get("raw_sha256")
+        .and_then(normalize_hash_value)
+        .ok_or_else(|| anyhow::anyhow!("processed evidence missing raw_sha256 for {suite}"))
+}
+
+fn raw_official_suite_hash(value: &serde_json::Value, suite: &str) -> Result<String> {
+    let suite_entry = official_suite_entry(value, suite)
+        .ok_or_else(|| anyhow::anyhow!("official evidence missing suite {suite}"))?;
+    if let Some(hash) = suite_entry.get("raw_sha256").and_then(normalize_hash_value) {
+        return Ok(hash);
+    }
+    let raw_path = suite_entry
+        .get("raw_path")
+        .or_else(|| suite_entry.get("raw"))
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| anyhow::anyhow!("official evidence suite {suite} missing raw_path"))?;
+    let output_hashes = value
+        .get("output_file_hashes")
+        .ok_or_else(|| anyhow::anyhow!("official evidence missing output_file_hashes"))?;
+    let normalized_raw_path = normalize_path(raw_path);
+    let raw_file_name = Path::new(raw_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(normalize_path);
+    official_hash_lookup(output_hashes, &normalized_raw_path)
+        .or_else(|| {
+            raw_file_name
+                .as_deref()
+                .and_then(|file_name| official_hash_lookup(output_hashes, file_name))
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!("official evidence missing output_file_hashes entry for {raw_path}")
+        })
+}
+
+fn official_suite_entry<'a>(
+    value: &'a serde_json::Value,
+    suite: &str,
+) -> Option<&'a serde_json::Value> {
+    let suites = value.get("suites")?;
+    if let Some(entry) = suites.get(suite) {
+        return Some(entry);
+    }
+    suites.as_array()?.iter().find(|entry| {
+        entry
+            .get("name")
+            .or_else(|| entry.get("suite"))
+            .and_then(|value| value.as_str())
+            == Some(suite)
+    })
+}
+
+fn official_hash_lookup(value: &serde_json::Value, expected_path: &str) -> Option<String> {
+    let entries = value.as_object()?;
+    for (key, item) in entries {
+        if normalize_path(key) == expected_path
+            && let Some(hash) = normalize_hash_value(item)
+        {
+            return Some(hash);
+        }
+        if let Some(object) = item.as_object() {
+            let path = object
+                .get("path")
+                .or_else(|| object.get("file"))
+                .or_else(|| object.get("name"))
+                .and_then(|value| value.as_str())
+                .map(normalize_path);
+            if path.as_deref() == Some(expected_path) {
+                for key in ["sha256", "hash", "digest", "value"] {
+                    if let Some(hash) = object.get(key).and_then(normalize_hash_value) {
+                        return Some(hash);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn normalize_hash_value(value: &serde_json::Value) -> Option<String> {
+    let mut hash = value.as_str()?.trim().to_ascii_lowercase();
+    if let Some(stripped) = hash.strip_prefix("sha256:") {
+        hash = stripped.to_owned();
+    }
+    (hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())).then_some(hash)
+}
+
+fn normalize_path(path: &str) -> String {
+    path.trim()
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .to_owned()
 }
 
 struct ArtifactNames {

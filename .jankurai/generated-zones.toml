@@ -5,13 +5,13 @@ source = "Migrated from /home/ubuntu/redlineDB/crates/bench/sqlite_parity/genera
 command = "copy from pinned RedlineDB parity corpus during split"
 
 [[zone]]
-path = "dist/redline-testing-0.1.1-linux-x86_64.tar.gz"
+path = "dist/redline-testing-0.1.2-linux-x86_64.tar.gz"
 read_only = false
 source = "local release package"
 command = "just release-local"
 
 [[zone]]
-path = "dist/redline-testing-0.1.1-linux-x86_64.tar.gz.sha256"
+path = "dist/redline-testing-0.1.2-linux-x86_64.tar.gz.sha256"
 read_only = false
 source = "local release checksum"
 command = "just release-local"

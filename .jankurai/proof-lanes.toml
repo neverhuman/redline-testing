@@ -9,3 +9,8 @@ commands = [
 commands = [
   "rtk just release-local",
 ]
+
+[lane.pr-ci]
+commands = [
+  "rtk scripts/ci-local.sh pr-ci",
+]

@@ -13,8 +13,8 @@
       "purpose": "verify the packaged beyond-SQLite metadata parses"
     },
     ".github/": {
-      "command": "rtk just release-local",
-      "purpose": "verify the release workflow package contract still builds locally"
+      "command": "rtk scripts/ci-local.sh pr-ci",
+      "purpose": "verify GitHub workflows use the same local CI and release validation surface"
     },
     "Cargo.toml": {
       "command": "rtk cargo check --locked",
@@ -23,6 +23,10 @@
     "justfile": {
       "command": "rtk just release-local",
       "purpose": "verify the local release tarball and checksum"
+    },
+    "scripts/ci-local.sh": {
+      "command": "rtk scripts/ci-local.sh pr-ci",
+      "purpose": "verify the PR CI and release validation surface stays executable locally"
     },
     ".jankurai/": {
       "command": "rtk cargo test --locked",

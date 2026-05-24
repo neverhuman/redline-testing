@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::beyond_sqlite;
-use crate::evidence::{self, EvidenceConfig};
+use crate::evidence::{self, EvidenceConfig, OfficialEvidenceConfig, OfficialSuiteEvidence};
 use crate::report::{self, JankuraiCompareOptions, ReportOptions, SentinelOptions};
 use crate::sqlite_parity;
 
@@ -73,6 +73,10 @@ struct ReportArgs {
     select: SelectArgs,
     #[arg(long)]
     input: PathBuf,
+    #[arg(long)]
+    official_evidence: Option<PathBuf>,
+    #[arg(long)]
+    local_diagnostics: bool,
     #[arg(long)]
     out_dir: PathBuf,
     #[arg(long)]
@@ -236,6 +240,7 @@ fn run_all_suites(
     tmp_root: PathBuf,
     sqlite_bin: PathBuf,
 ) -> Result<()> {
+    let generated_at_unix_ms = evidence::now_unix_ms();
     let output_dir = args
         .output
         .parent()
@@ -261,8 +266,8 @@ fn run_all_suites(
         Suite::Memory,
         memory_output.clone(),
         workers,
-        tmp_root,
-        sqlite_bin,
+        tmp_root.clone(),
+        sqlite_bin.clone(),
     )?;
     prepare_output(&beyond_output)?;
     let beyond_summary = run_beyond_sqlite_suite(args, beyond_output.clone())?;
@@ -275,15 +280,66 @@ fn run_all_suites(
     }
     fs::write(&args.output, combined)
         .with_context(|| format!("write {}", args.output.display()))?;
-    write_all_manifest(
+    let all_manifest = write_all_manifest(
         output_dir,
         &args.output,
         [
-            ("sqlite_parity", sqlite_output.as_path(), sqlite_summary),
-            ("memory", memory_output.as_path(), memory_summary),
-            ("beyond_sqlite", beyond_output.as_path(), beyond_summary),
+            (
+                "sqlite_parity",
+                sqlite_output.as_path(),
+                sqlite_summary.clone(),
+            ),
+            ("memory", memory_output.as_path(), memory_summary.clone()),
+            (
+                "beyond_sqlite",
+                beyond_output.as_path(),
+                beyond_summary.clone(),
+            ),
         ],
-    )
+    )?;
+    evidence::write_official_evidence(OfficialEvidenceConfig {
+        output_dir: output_dir.to_path_buf(),
+        all_output: args.output.clone(),
+        all_manifest,
+        target_bin: args.target_bin.clone(),
+        sqlite_bin,
+        tmp_root,
+        workers: workers.to_string(),
+        repetitions: args.repetitions,
+        warmup: args.warmup,
+        memory_samples: args.memory_samples,
+        command_line: std::env::args().collect::<Vec<_>>(),
+        generated_at_unix_ms,
+        suites: vec![
+            OfficialSuiteEvidence::new(
+                "sqlite_parity",
+                sqlite_output,
+                evidence::suite_artifact_path(output_dir, "sqlite_parity", "summary.json"),
+                evidence::suite_artifact_path(output_dir, "sqlite_parity", "ranked.csv"),
+                evidence::suite_artifact_path(output_dir, "sqlite_parity", "manifest.json"),
+                evidence::suite_artifact_path(output_dir, "sqlite_parity", "provenance.json"),
+                &sqlite_summary,
+            ),
+            OfficialSuiteEvidence::new(
+                "memory",
+                memory_output,
+                evidence::suite_artifact_path(output_dir, "memory", "summary.json"),
+                evidence::suite_artifact_path(output_dir, "memory", "ranked.csv"),
+                evidence::suite_artifact_path(output_dir, "memory", "manifest.json"),
+                evidence::suite_artifact_path(output_dir, "memory", "provenance.json"),
+                &memory_summary,
+            ),
+            OfficialSuiteEvidence::new(
+                "beyond_sqlite",
+                beyond_output,
+                evidence::suite_artifact_path(output_dir, "beyond_sqlite", "summary.json"),
+                evidence::suite_artifact_path(output_dir, "beyond_sqlite", "ranked.csv"),
+                evidence::suite_artifact_path(output_dir, "beyond_sqlite", "manifest.json"),
+                evidence::suite_artifact_path(output_dir, "beyond_sqlite", "provenance.json"),
+                &beyond_summary,
+            ),
+        ],
+    })
 }
 
 fn run_sqlite_like_suite(
@@ -340,7 +396,7 @@ fn write_all_manifest<'a>(
     output_dir: &Path,
     output: &Path,
     summaries: impl IntoIterator<Item = (&'a str, &'a Path, sqlite_parity::RunSummary)>,
-) -> Result<()> {
+) -> Result<PathBuf> {
     let suites = summaries
         .into_iter()
         .map(|(suite, raw_path, summary)| {
@@ -360,17 +416,21 @@ fn write_all_manifest<'a>(
         "raw": output.display().to_string(),
         "suites": suites
     });
+    let manifest_path = output_dir.join("all-manifest.json");
     fs::write(
-        output_dir.join("all-manifest.json"),
+        &manifest_path,
         format!("{}\n", serde_json::to_string_pretty(&manifest)?),
     )
-    .with_context(|| format!("write {}", output_dir.join("all-manifest.json").display()))
+    .with_context(|| format!("write {}", manifest_path.display()))?;
+    Ok(manifest_path)
 }
 
 fn report(args: ReportArgs) -> Result<()> {
     report::generate(ReportOptions {
         suite: args.suite.as_str().to_owned(),
         input: args.input,
+        official_evidence: args.official_evidence,
+        local_diagnostics: args.local_diagnostics,
         out_dir: args.out_dir,
         readme: args.readme,
         plot: args.plot,

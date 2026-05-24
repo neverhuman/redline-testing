@@ -8,6 +8,7 @@
       "corpus/**",
       "metadata/**",
       "schemas/**",
+      "scripts/**",
       "templates/**",
       "README.md",
       "justfile"

@@ -27,6 +27,110 @@ pub struct EvidenceConfig {
     pub summary: RunSummary,
 }
 
+#[derive(Debug)]
+pub struct OfficialSuiteEvidence {
+    pub name: String,
+    pub raw_path: PathBuf,
+    pub summary_path: PathBuf,
+    pub ranked_path: PathBuf,
+    pub manifest_path: PathBuf,
+    pub provenance_path: PathBuf,
+    pub total: usize,
+    pub passed: usize,
+    pub failed: usize,
+    pub skipped: usize,
+}
+
+impl OfficialSuiteEvidence {
+    pub fn new(
+        name: impl Into<String>,
+        raw_path: PathBuf,
+        summary_path: PathBuf,
+        ranked_path: PathBuf,
+        manifest_path: PathBuf,
+        provenance_path: PathBuf,
+        summary: &RunSummary,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            raw_path,
+            summary_path,
+            ranked_path,
+            manifest_path,
+            provenance_path,
+            total: summary.total,
+            passed: summary.passed,
+            failed: summary.failed,
+            skipped: summary.skipped,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct OfficialEvidenceConfig {
+    pub output_dir: PathBuf,
+    pub all_output: PathBuf,
+    pub all_manifest: PathBuf,
+    pub target_bin: PathBuf,
+    pub sqlite_bin: PathBuf,
+    pub tmp_root: PathBuf,
+    pub workers: String,
+    pub repetitions: usize,
+    pub warmup: usize,
+    pub memory_samples: bool,
+    pub command_line: Vec<String>,
+    pub generated_at_unix_ms: u128,
+    pub suites: Vec<OfficialSuiteEvidence>,
+}
+
+#[derive(Debug, Serialize)]
+struct BinaryEvidence {
+    path: String,
+    sha256: String,
+    version: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RunnerEvidence {
+    binary_path: String,
+    binary_sha256: String,
+    release_binary_sha256: String,
+    release_tarball_sha256: Option<String>,
+    version: String,
+}
+
+#[derive(Debug, Serialize)]
+struct OfficialSuiteJson {
+    name: String,
+    total: usize,
+    passed: usize,
+    failed: usize,
+    skipped: usize,
+    raw_path: String,
+    summary_path: String,
+    ranked_path: String,
+    manifest_path: String,
+    provenance_path: String,
+}
+
+#[derive(Debug, Serialize)]
+struct OfficialEvidenceJson {
+    schema_version: String,
+    runner: RunnerEvidence,
+    target: BinaryEvidence,
+    sqlite: BinaryEvidence,
+    suites: BTreeMap<String, OfficialSuiteJson>,
+    status: String,
+    command_line: Vec<String>,
+    generated_at_unix_ms: u128,
+    output_file_hashes: BTreeMap<String, String>,
+    workers: String,
+    repetitions: usize,
+    warmup: usize,
+    memory_samples: bool,
+    tmp_root: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct RawRecord {
     case_id: String,
@@ -227,12 +331,133 @@ pub fn write_sqlite_parity_evidence(config: EvidenceConfig) -> Result<()> {
     Ok(())
 }
 
+pub fn suite_artifact_path(output_dir: &Path, suite: &str, base: &str) -> PathBuf {
+    output_dir.join(suite_artifact_name(suite, base))
+}
+
 fn suite_artifact_name(suite: &str, base: &str) -> String {
     match suite {
         "sqlite_parity" | "all" => base.to_owned(),
         "memory" => format!("memory-{base}"),
         other => format!("{}-{base}", other.replace('_', "-")),
     }
+}
+
+pub fn write_official_evidence(config: OfficialEvidenceConfig) -> Result<()> {
+    let redline_testing_bin = std::env::current_exe().context("resolve current executable")?;
+    let redline_testing_binary_sha256 = sha256_file(&redline_testing_bin)?;
+    let release_binary_sha256 = env_sha("CI_REDLINE_TESTING_RELEASE_BINARY_SHA256")
+        .or_else(|| env_sha("CI_REDLINE_TESTING_BIN_SHA256"))
+        .unwrap_or_else(|| redline_testing_binary_sha256.clone());
+    let runner = RunnerEvidence {
+        binary_path: display_path(&redline_testing_bin),
+        binary_sha256: redline_testing_binary_sha256,
+        release_binary_sha256,
+        release_tarball_sha256: env_sha("CI_REDLINE_TESTING_RELEASE_TARBALL_SHA256"),
+        version: format!("redline-testing {}", env!("CARGO_PKG_VERSION")),
+    };
+    let target = BinaryEvidence {
+        path: canonical_display(&config.target_bin),
+        sha256: sha256_file(&resolve_executable_path(&config.target_bin)?)?,
+        version: capture_version(&config.target_bin)?,
+    };
+    let sqlite = BinaryEvidence {
+        path: canonical_display(&config.sqlite_bin),
+        sha256: sha256_file(&resolve_executable_path(&config.sqlite_bin)?)?,
+        version: capture_version(&config.sqlite_bin)?,
+    };
+
+    let mut output_file_hashes = BTreeMap::new();
+    insert_hash(
+        &mut output_file_hashes,
+        &config.output_dir,
+        &config.all_output,
+    )?;
+    insert_hash(
+        &mut output_file_hashes,
+        &config.output_dir,
+        &config.all_manifest,
+    )?;
+
+    let mut suites = BTreeMap::new();
+    let mut failed = 0usize;
+    for suite in config.suites {
+        failed = failed.saturating_add(suite.failed);
+        insert_hash(&mut output_file_hashes, &config.output_dir, &suite.raw_path)?;
+        insert_hash(
+            &mut output_file_hashes,
+            &config.output_dir,
+            &suite.summary_path,
+        )?;
+        insert_hash(
+            &mut output_file_hashes,
+            &config.output_dir,
+            &suite.ranked_path,
+        )?;
+        insert_hash(
+            &mut output_file_hashes,
+            &config.output_dir,
+            &suite.manifest_path,
+        )?;
+        insert_hash(
+            &mut output_file_hashes,
+            &config.output_dir,
+            &suite.provenance_path,
+        )?;
+        suites.insert(
+            suite.name.clone(),
+            OfficialSuiteJson {
+                name: suite.name,
+                total: suite.total,
+                passed: suite.passed,
+                failed: suite.failed,
+                skipped: suite.skipped,
+                raw_path: relative_display(&config.output_dir, &suite.raw_path),
+                summary_path: relative_display(&config.output_dir, &suite.summary_path),
+                ranked_path: relative_display(&config.output_dir, &suite.ranked_path),
+                manifest_path: relative_display(&config.output_dir, &suite.manifest_path),
+                provenance_path: relative_display(&config.output_dir, &suite.provenance_path),
+            },
+        );
+    }
+
+    let evidence = OfficialEvidenceJson {
+        schema_version: "redline-testing-official-evidence-v1".to_owned(),
+        runner,
+        target,
+        sqlite,
+        suites,
+        status: if failed == 0 { "passed" } else { "failed" }.to_owned(),
+        command_line: config.command_line,
+        generated_at_unix_ms: config.generated_at_unix_ms,
+        output_file_hashes,
+        workers: config.workers,
+        repetitions: config.repetitions,
+        warmup: config.warmup,
+        memory_samples: config.memory_samples,
+        tmp_root: display_path(&config.tmp_root),
+    };
+    let evidence_path = config.output_dir.join("official-evidence.json");
+    fs::write(
+        &evidence_path,
+        format!("{}\n", serde_json::to_string_pretty(&evidence)?),
+    )
+    .with_context(|| format!("write {}", evidence_path.display()))
+}
+
+fn insert_hash(
+    output_file_hashes: &mut BTreeMap<String, String>,
+    output_dir: &Path,
+    path: &Path,
+) -> Result<()> {
+    output_file_hashes.insert(relative_display(output_dir, path), sha256_file(path)?);
+    Ok(())
+}
+
+fn relative_display(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .map(display_path)
+        .unwrap_or_else(|_| display_path(path))
 }
 
 fn file_name(path: &Path) -> String {
