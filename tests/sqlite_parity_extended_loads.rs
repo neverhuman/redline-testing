@@ -48,8 +48,8 @@ fn every_extended_shard_parses_and_has_unique_ids() {
     let valid_priorities = ["P0", "P1", "P2", "P3", "P4"];
     for path in &paths {
         let body = fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
-        let cases: Vec<CaseLite> = serde_json::from_str(&body)
-            .unwrap_or_else(|e| panic!("parse {path:?}: {e}"));
+        let cases: Vec<CaseLite> =
+            serde_json::from_str(&body).unwrap_or_else(|e| panic!("parse {path:?}: {e}"));
         assert!(!cases.is_empty(), "shard {path:?} is empty");
         for case in &cases {
             assert!(
@@ -85,8 +85,7 @@ fn extended_ids_dont_collide_with_pinned() {
     // The pinned manifest covers 1..=1127. Extended must start at >= 10001,
     // never reusing pinned space (1128..=9999 reserved for upstream growth).
     let pinned_raw = include_str!("../corpus/sqlite_parity/generated_manifest.json");
-    let pinned: Vec<CaseLite> =
-        serde_json::from_str(pinned_raw).expect("parse pinned manifest");
+    let pinned: Vec<CaseLite> = serde_json::from_str(pinned_raw).expect("parse pinned manifest");
     let pinned_ids: HashSet<u64> = pinned.iter().map(|c| c.id).collect();
     for path in fs::read_dir(cases_dir())
         .expect("cases dir")
@@ -95,8 +94,7 @@ fn extended_ids_dont_collide_with_pinned() {
         let p = path.path();
         if p.extension().is_some_and(|ext| ext == "json") {
             let body = fs::read_to_string(&p).expect("read shard");
-            let cases: Vec<CaseLite> =
-                serde_json::from_str(&body).expect("parse shard");
+            let cases: Vec<CaseLite> = serde_json::from_str(&body).expect("parse shard");
             for c in &cases {
                 assert!(
                     !pinned_ids.contains(&c.id),

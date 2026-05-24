@@ -23,10 +23,7 @@ fn raw_record_schema_pins_required_fields() {
         .get("required")
         .and_then(|v| v.as_array())
         .expect("schema required is an array");
-    let names: Vec<&str> = required
-        .iter()
-        .filter_map(|v| v.as_str())
-        .collect();
+    let names: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
     // These exact field names are the public contract with RedlineDB's
     // report parser. Adding to the list is allowed; removing breaks downstream.
     for needed in [
@@ -56,10 +53,7 @@ fn memory_status_vocabulary_is_fixed() {
         .and_then(|m| m.get("enum"))
         .and_then(|e| e.as_array())
         .expect("memory_status.enum is an array");
-    let values: Vec<&str> = memory_status
-        .iter()
-        .filter_map(|v| v.as_str())
-        .collect();
+    let values: Vec<&str> = memory_status.iter().filter_map(|v| v.as_str()).collect();
     for needed in ["sampled", "unavailable", "disabled", "not_run"] {
         assert!(
             values.contains(&needed),

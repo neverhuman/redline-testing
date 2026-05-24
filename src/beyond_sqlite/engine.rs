@@ -209,17 +209,20 @@ pub fn invoke_psql(
     for arg in conn.as_psql_args() {
         command.arg(arg);
     }
+    // Use -P (pset option) rather than -c "\pset ..." so the formatting
+    // applies to the SQL we then feed on stdin. -c switches psql into
+    // single-command mode and stops reading stdin afterwards.
     command
-        .arg("-c")
-        .arg("\\pset null NULL")
-        .arg("-c")
-        .arg("\\pset format unaligned")
-        .arg("-c")
-        .arg("\\pset tuples_only on")
-        .arg("-c")
-        .arg("\\pset fieldsep |")
-        .arg("-c")
-        .arg("\\pset border 0");
+        .arg("-P")
+        .arg("null=NULL")
+        .arg("-P")
+        .arg("format=unaligned")
+        .arg("-P")
+        .arg("tuples_only=on")
+        .arg("-P")
+        .arg("fieldsep=|")
+        .arg("-P")
+        .arg("border=0");
     for (key, value) in extra_set_commands {
         command.arg("-c").arg(format!("SET {key} = {value}"));
     }

@@ -30,8 +30,7 @@ fn repo_root() -> PathBuf {
 fn features_json_parses_and_ranks_are_strict_increasing() {
     let raw = std::fs::read_to_string(repo_root().join("metadata/beyond_sqlite/features.json"))
         .expect("read features.json");
-    let features: Vec<FeatureLite> =
-        serde_json::from_str(&raw).expect("parse features.json");
+    let features: Vec<FeatureLite> = serde_json::from_str(&raw).expect("parse features.json");
     assert!(features.len() >= 10, "expected >= 10 ranked features");
     assert!(
         features.windows(2).all(|pair| pair[0].rank < pair[1].rank),
@@ -46,10 +45,7 @@ fn features_json_parses_and_ranks_are_strict_increasing() {
             f.rank
         );
         assert!(
-            matches!(
-                f.status.as_str(),
-                "manifest_backlog" | "passing_reference"
-            ),
+            matches!(f.status.as_str(), "manifest_backlog" | "passing_reference"),
             "feature {} has unexpected status {}",
             f.rank,
             f.status
@@ -62,8 +58,8 @@ fn beyond_case_manifest_parses_and_is_ordered() {
     let raw =
         std::fs::read_to_string(repo_root().join("corpus/beyond_sqlite/generated_manifest.json"))
             .expect("read beyond case manifest");
-    let cases: Vec<CaseLite> = serde_json::from_str(&raw)
-        .expect("parse corpus/beyond_sqlite/generated_manifest.json");
+    let cases: Vec<CaseLite> =
+        serde_json::from_str(&raw).expect("parse corpus/beyond_sqlite/generated_manifest.json");
     let valid_priorities = ["P0", "P1", "P2", "P3", "P4"];
     let mut prev_id: Option<u64> = None;
     for case in &cases {
@@ -85,7 +81,11 @@ fn beyond_case_manifest_parses_and_is_ordered() {
             case.name,
             case.feature_rank
         );
-        assert!(!case.category.is_empty(), "beyond case {} has empty category", case.name);
+        assert!(
+            !case.category.is_empty(),
+            "beyond case {} has empty category",
+            case.name
+        );
         if let Some(prev) = prev_id {
             assert!(
                 prev < case.id,
