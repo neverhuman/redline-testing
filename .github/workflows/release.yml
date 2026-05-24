@@ -50,10 +50,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${GITHUB_REF_NAME:-manual}"
+          # --verify-tag binds the release to a tag that already exists in
+          # the repo, preventing accidental release creation against a
+          # mutable / non-tag ref.
           gh release create "$tag" \
             --repo "$GITHUB_REPOSITORY" \
             --title "$tag" \
             --notes "redline-testing ${tag}" \
+            --verify-tag \
             dist/redline-testing-*-linux-x86_64.tar.gz \
             dist/redline-testing-*-linux-x86_64.tar.gz.sha256 \
             dist/release-manifest.json

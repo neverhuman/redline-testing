@@ -1,5 +1,20 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+# Default recipe runs the same lane CI runs.
+default: pr-ci
+
+# Fast format + compile check (matches the start of pr-ci, no test run).
+check:
+    cargo fmt --check
+    cargo check --locked --all-targets
+
+# Run the Rust test suite (28 integration + unit tests).
+test:
+    cargo test --locked
+
+# Full verification mirror of GitHub Actions ci.yml.
+verify: pr-ci
+
 pr-ci:
     scripts/ci-local.sh pr-ci
 

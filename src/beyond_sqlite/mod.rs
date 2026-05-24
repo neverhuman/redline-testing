@@ -2,7 +2,7 @@
 //!
 //! The suite has two layers stacked into a single JSONL emission:
 //!
-//!   1. **Legacy taxonomy emission** (`legacy`). For every entry in
+//!   1. **Taxonomy emission** (`taxonomy`). For every entry in
 //!      `metadata/beyond_sqlite/features.json` we emit a feature-level record
 //!      describing rank, owner, proof lane, and the `passing_reference` vs
 //!      `manifest_backlog` status. This is the historical contract that
@@ -22,8 +22,8 @@
 
 pub mod case;
 pub mod engine;
-pub mod legacy;
 pub mod normalize;
 pub mod oracle;
+pub mod taxonomy;
 
-pub use legacy::{Feature, FeatureStatus, RunConfig, all_features, run};
+pub use taxonomy::{Feature, FeatureStatus, RunConfig, all_features, run};

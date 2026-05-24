@@ -52,7 +52,10 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_HOST_AUTH_METHOD: trust
         ports:
-          - 5432:5432
+          # Bind to loopback only — the beyond-postgres CI job is internal;
+          # publishing 5432 on 0.0.0.0 would let other workflow services
+          # reach the test database.
+          - 127.0.0.1:5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
