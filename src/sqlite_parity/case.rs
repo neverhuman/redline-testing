@@ -100,6 +100,13 @@ pub struct Case {
     pub files: Vec<(String, String)>,
     pub script: Option<String>,
     pub notes: String,
+    /// Capability tokens required to run this case. Resolved against the
+    /// reference shell at probe time; cases missing a capability are skipped
+    /// with a clear "<sqlite3 X.Y.Z> lacks <feature>" reason. Backwards
+    /// compatible: the pinned manifest omits the field and serde fills it in
+    /// as an empty vec.
+    #[serde(default)]
+    pub required_capabilities: Vec<String>,
 }
 
 impl Case {

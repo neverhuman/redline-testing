@@ -49,6 +49,13 @@ pub enum Capability {
     DotDbTotxt,
     DotRecover,
     EscapeSymbolOption,
+    Fts5,
+    Rtree,
+    Jsonb,
+    Math1,
+    GenerateSeries,
+    JsonPretty,
+    JsonbArrayInsert,
 }
 
 impl Capability {
@@ -60,6 +67,32 @@ impl Capability {
             Self::DotDbTotxt => ".dbtotxt",
             Self::DotRecover => ".recover",
             Self::EscapeSymbolOption => "-escape symbol",
+            Self::Fts5 => "fts5 virtual table",
+            Self::Rtree => "rtree virtual table",
+            Self::Jsonb => "jsonb() (3.45+)",
+            Self::Math1 => "math1 functions (acos/asin/sqrt/etc.)",
+            Self::GenerateSeries => "generate_series virtual table",
+            Self::JsonPretty => "json_pretty() (3.46+)",
+            Self::JsonbArrayInsert => "jsonb_array_insert() (3.47+)",
+        }
+    }
+
+    pub fn from_token(token: &str) -> Option<Self> {
+        match token {
+            "percentile_functions" => Some(Self::PercentileFunctions),
+            "dot_crlf" => Some(Self::DotCrlf),
+            "dot_dbinfo" => Some(Self::DotDbInfo),
+            "dot_dbtotxt" => Some(Self::DotDbTotxt),
+            "dot_recover" => Some(Self::DotRecover),
+            "escape_symbol_option" => Some(Self::EscapeSymbolOption),
+            "fts5" => Some(Self::Fts5),
+            "rtree" => Some(Self::Rtree),
+            "jsonb" => Some(Self::Jsonb),
+            "math1" => Some(Self::Math1),
+            "generate_series" => Some(Self::GenerateSeries),
+            "json_pretty" => Some(Self::JsonPretty),
+            "jsonb_array_insert" => Some(Self::JsonbArrayInsert),
+            _ => None,
         }
     }
 }
@@ -73,6 +106,13 @@ pub struct ShellCapabilities {
     pub dot_dbtotxt: bool,
     pub dot_recover: bool,
     pub escape_symbol_option: bool,
+    pub fts5: bool,
+    pub rtree: bool,
+    pub jsonb: bool,
+    pub math1: bool,
+    pub generate_series: bool,
+    pub json_pretty: bool,
+    pub jsonb_array_insert: bool,
 }
 
 impl ShellCapabilities {
@@ -84,6 +124,13 @@ impl ShellCapabilities {
             Capability::DotDbTotxt => self.dot_dbtotxt,
             Capability::DotRecover => self.dot_recover,
             Capability::EscapeSymbolOption => self.escape_symbol_option,
+            Capability::Fts5 => self.fts5,
+            Capability::Rtree => self.rtree,
+            Capability::Jsonb => self.jsonb,
+            Capability::Math1 => self.math1,
+            Capability::GenerateSeries => self.generate_series,
+            Capability::JsonPretty => self.json_pretty,
+            Capability::JsonbArrayInsert => self.jsonb_array_insert,
         }
     }
 }
@@ -130,16 +177,32 @@ pub fn partition_cases(
     partition
 }
 
-pub fn required_capabilities(case: &Case) -> &'static [Capability] {
-    match case.id {
-        92 => &[Capability::PercentileFunctions],
-        134 => &[Capability::DotCrlf],
-        154 => &[Capability::DotDbInfo],
-        155 => &[Capability::DotDbTotxt],
-        156 => &[Capability::DotRecover],
-        222 => &[Capability::EscapeSymbolOption],
-        _ => &[],
+/// Capabilities a case needs. Pulls from two sources, in order of priority:
+///
+///   1. Legacy hardcoded table for pinned-manifest cases that don't carry
+///      capability tokens (ids 92, 134, 154, 155, 156, 222).
+///   2. The `required_capabilities` field on the case itself, populated by
+///      new shards under `corpus/sqlite_parity/cases/`. Unknown tokens are
+///      silently dropped — the case simply runs without gating on a
+///      capability we don't know about (forwards-compatible).
+pub fn required_capabilities(case: &Case) -> Vec<Capability> {
+    let mut caps = match case.id {
+        92 => vec![Capability::PercentileFunctions],
+        134 => vec![Capability::DotCrlf],
+        154 => vec![Capability::DotDbInfo],
+        155 => vec![Capability::DotDbTotxt],
+        156 => vec![Capability::DotRecover],
+        222 => vec![Capability::EscapeSymbolOption],
+        _ => Vec::new(),
+    };
+    for token in &case.required_capabilities {
+        if let Some(cap) = Capability::from_token(token) {
+            if !caps.contains(&cap) {
+                caps.push(cap);
+            }
+        }
     }
+    caps
 }
 
 pub fn probe_sqlite_shell_capabilities(bin: &Path) -> Result<ShellCapabilities> {
@@ -158,6 +221,38 @@ pub fn probe_sqlite_shell_capabilities(bin: &Path) -> Result<ShellCapabilities> 
         dot_dbtotxt: shell_help_contains(bin, ".dbtotxt")?,
         dot_recover: shell_help_contains(bin, ".recover")?,
         escape_symbol_option: escape_symbol_option_supported(bin)?,
+        fts5: run_sql_script(
+            bin,
+            memory_db,
+            "CREATE VIRTUAL TABLE _probe_fts USING fts5(x);\n",
+            &[],
+        )?,
+        rtree: run_sql_script(
+            bin,
+            memory_db,
+            "CREATE VIRTUAL TABLE _probe_rtree USING rtree(id, x0, x1, y0, y1);\n",
+            &[],
+        )?,
+        jsonb: run_sql_script(bin, memory_db, "SELECT length(jsonb('1'));\n", &[])?,
+        math1: run_sql_script(
+            bin,
+            memory_db,
+            "SELECT round(acos(1.0),3), round(sqrt(4.0),3);\n",
+            &[],
+        )?,
+        generate_series: run_sql_script(
+            bin,
+            memory_db,
+            "SELECT count(*) FROM generate_series(1,3);\n",
+            &[],
+        )?,
+        json_pretty: run_sql_script(bin, memory_db, "SELECT json_pretty('{\"a\":1}');\n", &[])?,
+        jsonb_array_insert: run_sql_script(
+            bin,
+            memory_db,
+            "SELECT length(jsonb_array_insert('[]', '$[0]', 1));\n",
+            &[],
+        )?,
     })
 }
 
