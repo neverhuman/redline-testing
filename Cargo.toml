@@ -10,6 +10,15 @@ edition = "2024"
 license = "Apache-2.0"
 rust-version = "1.95"
 
+[features]
+default = []
+# When enabled, the beyond-SQLite oracle can auto-bootstrap an embedded
+# Postgres via the `postgresql_embedded` crate. Off by default to keep the
+# zero-extra-deps invariant for SQLite-parity-only builds. The dep is intentionally
+# NOT yet listed in [dependencies]; this declaration is a future-compatible stub
+# that consumers can opt into when the embedded-pg surface is ready.
+pg-embedded = []
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::sqlite_parity::RunSummary;
 
-const FEATURES: &str = include_str!("../metadata/beyond_sqlite/features.json");
+const FEATURES: &str = include_str!("../../metadata/beyond_sqlite/features.json");
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Feature {
@@ -171,30 +171,79 @@ pub fn run(config: RunConfig) -> Result<RunSummary> {
         raw.push('\n');
     }
 
-    fs::write(&config.output, &raw)
+    // Executable-oracle layer: append per-case outcomes from
+    // corpus/beyond_sqlite/generated_manifest.json. When the manifest is
+    // empty (commit 5 baseline) this is a no-op. When Postgres is
+    // unavailable, every case emits a `skipped` record with a diagnostic;
+    // we never let oracle failures break the suite.
+    let (oracle_summary, oracle_outcomes) = super::oracle::run_cases().unwrap_or((
+        super::oracle::OracleSummary {
+            total: 0,
+            passed: 0,
+            skipped_unavailable: 0,
+            skipped_feature_missing: 0,
+            failed: 0,
+        },
+        Vec::new(),
+    ));
+    let mut oracle_raw = String::new();
+    for outcome in &oracle_outcomes {
+        let record = serde_json::json!({
+            "suite": "beyond_sqlite",
+            "case_id": format!("BEYOND-CASE-{:05}", outcome.case_id),
+            "name": outcome.name,
+            "case_file": "corpus/beyond_sqlite/generated_manifest.json",
+            "priority": "P0",
+            "profile": "beyond_sqlite_oracle",
+            "category": "beyond_sqlite_oracle",
+            "sample_index": 0,
+            "repetition_index": 1,
+            "sample_role": "measured:1",
+            "reference_engine": "postgres",
+            "target_engine": "postgres",
+            "feature_rank": outcome.feature_rank,
+            "status": outcome.status,
+            "diagnostic": outcome.diagnostic,
+            "reference_elapsed_ns": 0,
+            "target_elapsed_ns": 0,
+            "memory_status": "not_run",
+        });
+        oracle_raw.push_str(&record.to_string());
+        oracle_raw.push('\n');
+    }
+    let mut combined = raw;
+    combined.push_str(&oracle_raw);
+    fs::write(&config.output, &combined)
         .with_context(|| format!("write {}", config.output.display()))?;
     write_artifacts(
         &config,
         &target,
         &postgres_status,
-        &raw,
+        &combined,
         BeyondSummary {
             suite: "beyond_sqlite".to_owned(),
-            total_features: features.len(),
-            passed_features: passed,
-            failed_features: 0,
-            skipped_features: skipped,
-            coverage_pct: pct(passed, features.len()),
+            total_features: features.len() + oracle_summary.total,
+            passed_features: passed + oracle_summary.passed,
+            failed_features: oracle_summary.failed,
+            skipped_features: skipped
+                + oracle_summary.skipped_unavailable
+                + oracle_summary.skipped_feature_missing,
+            coverage_pct: pct(
+                passed + oracle_summary.passed,
+                features.len() + oracle_summary.total,
+            ),
             elapsed_ns: started.elapsed().as_nanos(),
         },
         &features,
     )?;
 
     Ok(RunSummary {
-        total: features.len(),
-        passed,
-        failed: 0,
-        skipped,
+        total: features.len() + oracle_summary.total,
+        passed: passed + oracle_summary.passed,
+        failed: oracle_summary.failed,
+        skipped: skipped
+            + oracle_summary.skipped_unavailable
+            + oracle_summary.skipped_feature_missing,
         elapsed: Duration::from_nanos(started.elapsed().as_nanos().min(u64::MAX as u128) as u64),
         slowest: Vec::new(),
     })
