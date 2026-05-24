@@ -45,6 +45,12 @@ pub enum Normalizer {
     /// For error-message parity: drop everything after the first line of
     /// stderr (SQLSTATE codes, hint lines, etc.). Apply only to stderr.
     ErrorFirstLineOnly,
+    /// Strip JSON-style string quoting from array elements, e.g.
+    /// `["a","b","c"]` → `[a,b,c]`. Pairs with PgArrayBraceToBracket so
+    /// PG's unquoted-text-array form `{a,b,c}` and RedlineDB's JSON form
+    /// `["a","b","c"]` reduce to the same `[a,b,c]` shape. Only applied
+    /// to cells that look like a top-level JSON array of strings.
+    JsonStringArrayUnquote,
 }
 
 /// Apply a single normalizer to text.
@@ -58,6 +64,7 @@ pub fn apply(text: &str, normalizer: Normalizer) -> String {
         Normalizer::PgArrayBraceToBracket => normalize_pg_array(text),
         Normalizer::StripTrailingWs => normalize_strip_trailing_ws(text),
         Normalizer::ErrorFirstLineOnly => normalize_first_line(text),
+        Normalizer::JsonStringArrayUnquote => normalize_json_string_array_unquote(text),
     }
 }
 
@@ -267,6 +274,51 @@ fn normalize_first_line(text: &str) -> String {
     text.lines().next().unwrap_or("").to_owned() + if text.ends_with('\n') { "\n" } else { "" }
 }
 
+/// `["a","b","c"]` → `[a,b,c]`. The cell is reparsed as a JSON array; if
+/// every element is a string, we emit the elements joined by `,` inside
+/// brackets. Non-string elements or non-array cells fall through unchanged
+/// (so an int-array cell like `[1,2,3]` remains a valid JSON literal).
+fn normalize_json_string_array_unquote(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            line.split('|')
+                .map(|cell| {
+                    let trimmed = cell.trim();
+                    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
+                        return cell.to_owned();
+                    }
+                    let parsed: serde_json::Value = match serde_json::from_str(trimmed) {
+                        Ok(v) => v,
+                        Err(_) => return cell.to_owned(),
+                    };
+                    let arr = match parsed {
+                        serde_json::Value::Array(a) => a,
+                        _ => return cell.to_owned(),
+                    };
+                    let mut parts: Vec<String> = Vec::with_capacity(arr.len());
+                    for v in arr {
+                        match v {
+                            serde_json::Value::String(s) => parts.push(s),
+                            other => {
+                                // Mixed-type — leave the whole cell untouched.
+                                return cell.to_owned();
+                                #[allow(unreachable_code)]
+                                {
+                                    let _ = other;
+                                }
+                            }
+                        }
+                    }
+                    format!("[{}]", parts.join(","))
+                })
+                .collect::<Vec<String>>()
+                .join("|")
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
+        + if text.ends_with('\n') { "\n" } else { "" }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,5 +388,33 @@ mod tests {
             ],
         );
         assert_eq!(out, "1.5|1|NULL\n");
+    }
+
+    #[test]
+    fn json_string_array_unquote_strips_quotes() {
+        let out = apply(
+            "[\"a\",\"b\",\"c\"]|other\n",
+            Normalizer::JsonStringArrayUnquote,
+        );
+        assert_eq!(out, "[a,b,c]|other\n");
+    }
+
+    #[test]
+    fn json_string_array_unquote_leaves_int_arrays_alone() {
+        let out = apply("[1,2,3]\n", Normalizer::JsonStringArrayUnquote);
+        assert_eq!(out, "[1,2,3]\n");
+    }
+
+    #[test]
+    fn json_string_array_unquote_paired_with_brace_to_bracket() {
+        // PG side: `{a,b,c}` becomes `[a,b,c]` via PgArrayBraceToBracket;
+        // RedlineDB side: `["a","b","c"]` collapses to `[a,b,c]` via the
+        // new unquote normalizer.
+        let pg = apply("{a,b,c}\n", Normalizer::PgArrayBraceToBracket);
+        let rdb = apply(
+            "[\"a\",\"b\",\"c\"]\n",
+            Normalizer::JsonStringArrayUnquote,
+        );
+        assert_eq!(pg, rdb);
     }
 }

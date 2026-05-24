@@ -223,9 +223,12 @@ pub fn invoke_psql(
         .arg("fieldsep=|")
         .arg("-P")
         .arg("border=0");
-    for (key, value) in extra_set_commands {
-        command.arg("-c").arg(format!("SET {key} = {value}"));
-    }
+    // NOTE: pg_settings used to be passed via `-c "SET key = value"`, but
+    // psql switches into single-command mode the moment it sees any `-c`
+    // argument and stops reading stdin afterwards — so the actual SELECT
+    // never ran and the case appeared as a phantom stdout-diff failure.
+    // We now prepend `SET key = value;` statements to the stdin instead;
+    // psql runs them in the same session as the case's SQL.
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -238,6 +241,12 @@ pub fn invoke_psql(
             .stdin
             .take()
             .ok_or_else(|| anyhow!("no stdin pipe for psql child"))?;
+        for (key, value) in extra_set_commands {
+            let line = format!("SET {key} = {value};\n");
+            child_stdin
+                .write_all(line.as_bytes())
+                .context("write psql SET prelude")?;
+        }
         child_stdin
             .write_all(stdin.as_bytes())
             .context("write psql stdin")?;
