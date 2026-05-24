@@ -4,13 +4,33 @@
       "command": "rtk cargo test --locked",
       "purpose": "verify the runner logic and CLI contract"
     },
-    "corpus/": {
+    "corpus/sqlite_parity/generated_manifest.json": {
       "command": "rtk cargo test --locked",
-      "purpose": "verify the embedded SQLite parity manifest parses"
+      "purpose": "verify the embedded pinned SQLite parity manifest parses and matches expected counts"
+    },
+    "corpus/sqlite_parity/cases/": {
+      "command": "rtk cargo run --locked -p xtask -- ship-gate",
+      "purpose": "verify every new SQLite parity case passes sqlite3↔sqlite3 self-compare before shipping"
+    },
+    "corpus/sqlite_parity/rules/": {
+      "command": "rtk cargo run --locked -p xtask -- generate --check",
+      "purpose": "verify generated shards match their rule files"
+    },
+    "corpus/beyond_sqlite/": {
+      "command": "rtk cargo test --locked --features pg-embedded --test beyond_sqlite_oracle -- --ignored",
+      "purpose": "verify every beyond-SQLite case passes psql↔psql self-compare before shipping"
     },
     "metadata/": {
       "command": "rtk cargo test --locked",
       "purpose": "verify the packaged beyond-SQLite metadata parses"
+    },
+    "tests/": {
+      "command": "rtk cargo test --locked",
+      "purpose": "verify Rust integration tests for parity, beyond-SQLite, release manifest integrity, timing/memory invariants"
+    },
+    "xtask/": {
+      "command": "rtk cargo run --locked -p xtask -- generate --check",
+      "purpose": "verify the corpus generator builds and produces drift-free shards"
     },
     ".github/": {
       "command": "rtk scripts/ci-local.sh pr-ci",

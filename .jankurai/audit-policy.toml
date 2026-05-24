@@ -1,0 +1,47 @@
+# jankurai audit policy for redline-testing
+#
+# redline-testing is a satellite repo that produces signed reference test
+# artifacts consumed by RedlineDB CI. It is NOT itself a product binary, so
+# this policy stays advisory: we register decisions here rather than gate CI.
+#
+# When tightening to a ratcheted gate later, set `mode = "ratchet"`, populate
+# `minimum_score`, and generate `.jankurai/accepted-baseline.json` via
+# `jankurai audit . --baseline`.
+
+mode = "advisory"
+disabled_rules = []
+
+[scan]
+# Audit-output and dist-output paths are noise.
+excluded_paths = [
+  ".jankurai/repo-score.json",
+  ".jankurai/repo-score.md",
+  ".jankurai/jankurai.sarif",
+  ".jankurai/repair-queue.jsonl",
+  ".jankurai/score-history.csv",
+  ".jankurai/score-history.jsonl",
+  "target/",
+  "dist/",
+]
+
+# SQL test fixtures are intentionally dense with SQL literals and adversarial
+# patterns (constraint-violation triggers, error-message text-matching, etc.).
+# They are proof inputs validated by `[lane.fast]` (reference self-compare via
+# `xtask ship-gate`) and `[lane.beyond-postgres-reference]` (psql self-compare),
+# not product-language scan targets. This mirrors the exclusion pattern at
+# `/home/ubuntu/redlineDB/.jankurai/audit-policy.toml` for
+# `crates/sql/tests/beyond_sqlite_manifest.rs` and `beyond_oracle/`.
+extra_excluded_paths = [
+  "tests/sqlite_parity_smoke.rs",
+  "tests/sqlite_parity_extended.rs",
+  "tests/beyond_sqlite_smoke.rs",
+  "tests/beyond_sqlite_oracle.rs",
+  "tests/pragma_coverage.rs",
+  "tests/cli_param_matrix.rs",
+  "tests/dot_command_coverage.rs",
+  "tests/release_manifest_integrity.rs",
+  "tests/timing_memory_invariants.rs",
+  "tests/manifest_priority_ordering.rs",
+  "tests/capability_probe_works.rs",
+  "xtask/",
+]
