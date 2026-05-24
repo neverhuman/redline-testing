@@ -71,6 +71,16 @@ struct RawRecord {
     status: String,
     reference_elapsed_ns: u128,
     target_elapsed_ns: u128,
+    #[serde(default)]
+    memory_status: String,
+    #[serde(default)]
+    reference_peak_rss_kb: Option<u64>,
+    #[serde(default)]
+    reference_rss_sampled_kb: Option<u64>,
+    #[serde(default)]
+    target_peak_rss_kb: Option<u64>,
+    #[serde(default)]
+    target_rss_sampled_kb: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -133,14 +143,42 @@ struct RankedCase {
     samples: usize,
 }
 
+#[derive(Debug, Clone)]
+struct SvgArtifact {
+    path: PathBuf,
+    contents: String,
+}
+
+#[derive(Debug, Clone)]
+struct SvgSpec {
+    title: String,
+    subtitle: String,
+    accent: &'static str,
+    metrics: Vec<SvgMetric>,
+    bars: Vec<SvgBar>,
+}
+
+#[derive(Debug, Clone)]
+struct SvgMetric {
+    label: String,
+    value: String,
+}
+
+#[derive(Debug, Clone)]
+struct SvgBar {
+    label: String,
+    value: f64,
+    value_label: String,
+}
+
 pub fn generate(options: ReportOptions) -> Result<()> {
     let raw_text = fs::read_to_string(&options.input)
         .with_context(|| format!("read raw input {}", options.input.display()))?;
     if let Some(official_evidence) = &options.official_evidence {
         validate_official_evidence_binding(official_evidence, &options.suite, &raw_text)?;
-    } else if !options.local_diagnostics {
+    } else if !options.local_diagnostics || options.check {
         bail!(
-            "redlineDB-facing report artifacts require --official-evidence; \
+            "reporting committed artifacts requires --official-evidence; \
              use --local-diagnostics only for uncommitted local diagnostics"
         );
     }
@@ -236,7 +274,7 @@ pub fn generate(options: ReportOptions) -> Result<()> {
     let summary_json = serde_json::to_string_pretty(&summary)? + "\n";
     let ranked_csv = ranked_csv(&ranked);
     let ksloc_csv = ksloc_csv();
-    let report_block = render_report_block(&summary, &ranked, &options);
+    let report_block = render_report_block(&summary, &ranked, &raw_records, &options);
     let metrics_block = render_metrics_block(&options);
     let mut readme = fs::read_to_string(&options.readme)
         .with_context(|| format!("read README {}", options.readme.display()))?;
@@ -337,6 +375,7 @@ pub fn generate(options: ReportOptions) -> Result<()> {
         manifest: manifest_json,
         provenance: provenance_json,
     };
+    let svg_artifacts = build_svg_artifacts(&summary, &ranked, &raw_records, &options);
 
     if options.check {
         verify_existing(
@@ -349,6 +388,7 @@ pub fn generate(options: ReportOptions) -> Result<()> {
             &provenance_out,
             &options.readme,
             &rendered,
+            &svg_artifacts,
         )?;
         return Ok(());
     }
@@ -370,31 +410,9 @@ pub fn generate(options: ReportOptions) -> Result<()> {
         rendered.ksloc,
     )?;
 
-    write_optional_svg(options.plot.as_deref(), "SQLite parity latency gap")?;
-    write_optional_svg(
-        options.ksloc_plot.as_deref(),
-        "SQLite vs RedlineDB production KSLOC",
-    )?;
-    write_optional_svg(
-        options.performance_histogram_plot.as_deref(),
-        "SQLite parity performance histogram",
-    )?;
-    write_optional_svg(
-        options.median_test_performance_plot.as_deref(),
-        "SQLite parity median test performance",
-    )?;
-    write_optional_svg(
-        options.jankurai_score_plot.as_deref(),
-        "RedlineDB vs SQLite Jankurai score",
-    )?;
-    write_optional_svg(
-        options.code_shape_plot.as_deref(),
-        "RedlineDB vs SQLite code shape",
-    )?;
-    write_optional_svg(
-        options.jankurai_comparison_plot.as_deref(),
-        "RedlineDB vs SQLite Jankurai comparison",
-    )?;
+    for artifact in svg_artifacts {
+        write_text(&artifact.path, &artifact.contents)?;
+    }
     if let Some(score_path) = &options.jankurai_score
         && score_path.exists()
     {
@@ -547,6 +565,159 @@ fn normalize_path(path: &str) -> String {
         .replace('\\', "/")
         .trim_start_matches("./")
         .to_owned()
+}
+
+fn suite_display_name(suite: &str) -> String {
+    match suite {
+        "memory" => "Memory".to_owned(),
+        "beyond_sqlite" => "Beyond-SQLite".to_owned(),
+        "sqlite_parity" => "SQLite parity".to_owned(),
+        "all" => "All suites".to_owned(),
+        other => other.replace('_', " "),
+    }
+}
+
+fn suite_subject(suite: &str) -> &'static str {
+    match suite {
+        "beyond_sqlite" => "features",
+        _ => "cases",
+    }
+}
+
+fn suite_accent(suite: &str) -> &'static str {
+    match suite {
+        "memory" => "#14b8a6",
+        "beyond_sqlite" => "#f59e0b",
+        "sqlite_parity" => "#38bdf8",
+        _ => "#64748b",
+    }
+}
+
+fn memory_status_summary(records: &[RawRecord]) -> &'static str {
+    if records
+        .iter()
+        .any(|record| record.memory_status == "sampled")
+    {
+        "sampled"
+    } else if records
+        .iter()
+        .any(|record| record.memory_status == "disabled")
+    {
+        "disabled"
+    } else {
+        "unavailable"
+    }
+}
+
+fn memory_peak_summary(records: &[RawRecord]) -> Option<String> {
+    let target_peak = median_u64(
+        records
+            .iter()
+            .filter_map(|record| record.target_peak_rss_kb),
+    )?;
+    let reference_peak = median_u64(
+        records
+            .iter()
+            .filter_map(|record| record.reference_peak_rss_kb),
+    )?;
+    let target_sampled = median_u64(
+        records
+            .iter()
+            .filter_map(|record| record.target_rss_sampled_kb),
+    )?;
+    let reference_sampled = median_u64(
+        records
+            .iter()
+            .filter_map(|record| record.reference_rss_sampled_kb),
+    )?;
+    Some(format!(
+        "median peak RSS target {} KB / reference {} KB; sampled RSS target {} KB / reference {} KB",
+        target_peak, reference_peak, target_sampled, reference_sampled
+    ))
+}
+
+fn median_gap(ranked: &[RankedCase]) -> f64 {
+    if ranked.is_empty() {
+        return 0.0;
+    }
+    let mut values = ranked
+        .iter()
+        .map(|case| case.improvement_pct)
+        .collect::<Vec<_>>();
+    values.sort_by(|left, right| left.total_cmp(right));
+    values[values.len() / 2]
+}
+
+fn worst_gap(ranked: &[RankedCase]) -> f64 {
+    ranked
+        .iter()
+        .map(|case| case.improvement_pct)
+        .min_by(|left, right| left.total_cmp(right))
+        .unwrap_or(0.0)
+}
+
+fn median_sqlite_ns(ranked: &[RankedCase]) -> u128 {
+    if ranked.is_empty() {
+        return 0;
+    }
+    median(ranked.iter().map(|case| case.sqlite_median_ns))
+}
+
+fn median_target_ns(ranked: &[RankedCase]) -> u128 {
+    if ranked.is_empty() {
+        return 0;
+    }
+    median(ranked.iter().map(|case| case.redline_median_ns))
+}
+
+fn human_duration_ns(value: u128) -> String {
+    if value >= 1_000_000_000 {
+        format!("{:.2}s", value as f64 / 1_000_000_000.0)
+    } else if value >= 1_000_000 {
+        format!("{:.2}ms", value as f64 / 1_000_000.0)
+    } else if value >= 1_000 {
+        format!("{:.2}us", value as f64 / 1_000.0)
+    } else {
+        format!("{value}ns")
+    }
+}
+
+fn histogram_bars(ranked: &[RankedCase]) -> Vec<SvgBar> {
+    let buckets = [
+        ("<-100%", 0.0, 0usize),
+        ("-100..-50", 0.0, 0usize),
+        ("-50..0", 0.0, 0usize),
+        ("0..50", 0.0, 0usize),
+        (">=50", 0.0, 0usize),
+    ];
+    let mut counts = buckets
+        .iter()
+        .map(|(label, value, count)| ((*label).to_owned(), *value, *count))
+        .collect::<Vec<_>>();
+    for case in ranked {
+        let pct = case.improvement_pct;
+        let bucket_index = if pct < -100.0 {
+            0
+        } else if pct < -50.0 {
+            1
+        } else if pct < 0.0 {
+            2
+        } else if pct < 50.0 {
+            3
+        } else {
+            4
+        };
+        counts[bucket_index].2 = counts[bucket_index].2.saturating_add(1);
+        counts[bucket_index].1 = counts[bucket_index].2 as f64;
+    }
+    counts
+        .into_iter()
+        .map(|(label, value, count)| SvgBar {
+            label,
+            value,
+            value_label: count.to_string(),
+        })
+        .collect()
 }
 
 struct ArtifactNames {
@@ -755,8 +926,11 @@ fn ksloc_csv() -> String {
 fn render_report_block(
     summary: &SummaryJson,
     ranked: &[RankedCase],
+    raw_records: &[RawRecord],
     options: &ReportOptions,
 ) -> String {
+    let suite_label = suite_display_name(&options.suite);
+    let suite_subject = suite_subject(&options.suite);
     let median_gap = if ranked.is_empty() {
         0.0
     } else {
@@ -778,32 +952,77 @@ fn render_report_block(
         .count();
     let mut block = String::new();
     block.push_str(&format!(
-        "**SQLite parity coverage:** **{} / {}** cases passed in CI. Failed: **{}**. Missing: **0**. Skipped: **{}**. Updated {}.\n\n",
+        "**{} coverage:** **{} / {}** {} passed in CI. Failed: **{}**. Skipped: **{}**. Updated {}.\n\n",
+        suite_label,
         summary.passed_cases,
         summary.total_cases,
+        suite_subject,
         summary.failed_cases,
         summary.skipped_cases,
         options.updated_date
     ));
-    block.push_str(&format!(
-        "**SQLite parity latency:** median gap **{:.2}%**, worst gap **{:.2}%**, faster cases **{}**.\n\n",
-        median_gap,
-        worst_gap,
-        faster_cases
-    ));
+    match options.suite.as_str() {
+        "beyond_sqlite" => {
+            block.push_str(&format!(
+                "**{} progress:** coverage **{:.2}%**, promoted reference features **{}**, manifest backlog **{}**.\n\n",
+                suite_label,
+                if summary.total_cases == 0 {
+                    0.0
+                } else {
+                    summary.passed_cases as f64 / summary.total_cases as f64 * 100.0
+                },
+                summary.passed_cases,
+                summary.skipped_cases
+            ));
+        }
+        "memory" => {
+            let memory_status = memory_status_summary(raw_records);
+            let memory_peaks = memory_peak_summary(raw_records)
+                .unwrap_or_else(|| "no RSS samples were captured".to_owned());
+            block.push_str(&format!(
+                "**{} latency:** median gap **{:.2}%**, worst gap **{:.2}%**, faster cases **{}**. RSS sampling: **{}**. {}.\n\n",
+                suite_label,
+                median_gap,
+                worst_gap,
+                faster_cases,
+                memory_status,
+                memory_peaks
+            ));
+        }
+        _ => {
+            block.push_str(&format!(
+                "**{} latency:** median gap **{:.2}%**, worst gap **{:.2}%**, faster cases **{}**.\n\n",
+                suite_label,
+                median_gap,
+                worst_gap,
+                faster_cases
+            ));
+        }
+    }
     if let Some(plot) = &options.plot {
         block.push_str(&format!(
-            "![SQLite parity latency improvement plot]({})\n\n",
+            "![{} latency improvement plot]({})\n\n",
+            suite_label,
             plot.display()
         ));
     }
     if let Some(plot) = &options.performance_histogram_plot {
         block.push_str(&format!(
-            "![SQLite parity performance distribution]({})\n\n",
+            "![{} performance distribution]({})\n\n",
+            suite_label,
             plot.display()
         ));
     }
-    block.push_str("<details id=\"sqlite-parity-ranked-latency-table\">\n<summary>Full ranked latency table</summary>\n\n");
+    let table_id = format!("{}-ranked-table", options.suite.replace('_', "-"));
+    let table_summary = if options.suite == "beyond_sqlite" {
+        "Full ranked feature table"
+    } else {
+        "Full ranked latency table"
+    };
+    block.push_str(&format!(
+        "<details id=\"{}\">\n<summary>{}</summary>\n\n",
+        table_id, table_summary
+    ));
     block.push_str("| Rank | Case | Priority | Profile | Category | SQLite median ns | RedlineDB median ns | Improvement |\n");
     block.push_str("| ---: | --- | --- | --- | --- | ---: | ---: | ---: |\n");
     for (index, row) in ranked.iter().take(25).enumerate() {
@@ -824,21 +1043,34 @@ fn render_report_block(
 }
 
 fn render_metrics_block(options: &ReportOptions) -> String {
+    let suite_label = suite_display_name(&options.suite);
     let mut block = String::new();
     if let Some(plot) = &options.jankurai_score_plot {
-        block.push_str(&format!("![Jankurai score]({})\n\n", plot.display()));
+        block.push_str(&format!("![{} score]({})\n\n", suite_label, plot.display()));
     }
     if let Some(plot) = &options.code_shape_plot {
-        block.push_str(&format!("![Code shape]({})\n\n", plot.display()));
+        block.push_str(&format!(
+            "![{} code shape]({})\n\n",
+            suite_label,
+            plot.display()
+        ));
     }
     if let Some(plot) = &options.median_test_performance_plot {
         block.push_str(&format!(
-            "![Median test performance]({})\n\n",
+            "![{} median test performance]({})\n\n",
+            suite_label,
             plot.display()
         ));
     }
     if let Some(plot) = &options.ksloc_plot {
-        block.push_str(&format!("![KSLOC]({})\n\n", plot.display()));
+        block.push_str(&format!("![{} KSLOC]({})\n\n", suite_label, plot.display()));
+    }
+    if let Some(plot) = &options.jankurai_comparison_plot {
+        block.push_str(&format!(
+            "![{} Jankurai comparison]({})\n\n",
+            suite_label,
+            plot.display()
+        ));
     }
     block
 }
@@ -857,18 +1089,320 @@ fn replace_block(text: &str, begin: &str, end: &str, replacement: &str) -> Strin
     }
 }
 
-fn write_optional_svg(path: Option<&Path>, title: &str) -> Result<()> {
-    if let Some(path) = path {
-        write_text(path, &simple_svg(title))?;
+fn build_svg_artifacts(
+    summary: &SummaryJson,
+    ranked: &[RankedCase],
+    raw_records: &[RawRecord],
+    options: &ReportOptions,
+) -> Vec<SvgArtifact> {
+    let suite_label = suite_display_name(&options.suite);
+    let suite_accent = suite_accent(&options.suite);
+    let mut artifacts = Vec::new();
+
+    if let Some(path) = &options.plot {
+        let spec = if options.suite == "beyond_sqlite" {
+            SvgSpec {
+                title: format!("{suite_label} feature progress"),
+                subtitle: "Coverage evidence for the beyond-SQLite backlog.".to_owned(),
+                accent: suite_accent,
+                metrics: vec![
+                    SvgMetric {
+                        label: "Passed".to_owned(),
+                        value: summary.passed_cases.to_string(),
+                    },
+                    SvgMetric {
+                        label: "Skipped".to_owned(),
+                        value: summary.skipped_cases.to_string(),
+                    },
+                    SvgMetric {
+                        label: "Coverage".to_owned(),
+                        value: format!(
+                            "{:.2}%",
+                            if summary.total_cases == 0 {
+                                0.0
+                            } else {
+                                summary.passed_cases as f64 / summary.total_cases as f64 * 100.0
+                            }
+                        ),
+                    },
+                ],
+                bars: vec![
+                    SvgBar {
+                        label: "passed".to_owned(),
+                        value: summary.passed_cases as f64,
+                        value_label: summary.passed_cases.to_string(),
+                    },
+                    SvgBar {
+                        label: "skipped".to_owned(),
+                        value: summary.skipped_cases as f64,
+                        value_label: summary.skipped_cases.to_string(),
+                    },
+                ],
+            }
+        } else {
+            SvgSpec {
+                title: format!("{suite_label} latency gap"),
+                subtitle: format!(
+                    "Updated {}; committed evidence bound to the report input.",
+                    options.updated_date
+                ),
+                accent: suite_accent,
+                metrics: vec![
+                    SvgMetric {
+                        label: "Median gap".to_owned(),
+                        value: format!("{:.2}%", median_gap(ranked)),
+                    },
+                    SvgMetric {
+                        label: "Worst gap".to_owned(),
+                        value: format!("{:.2}%", worst_gap(ranked)),
+                    },
+                    SvgMetric {
+                        label: "Faster cases".to_owned(),
+                        value: ranked
+                            .iter()
+                            .filter(|case| case.improvement_pct > 0.0)
+                            .count()
+                            .to_string(),
+                    },
+                ],
+                bars: histogram_bars(ranked),
+            }
+        };
+        artifacts.push(SvgArtifact {
+            path: path.clone(),
+            contents: render_styled_svg(&spec),
+        });
     }
-    Ok(())
+
+    if let Some(path) = &options.performance_histogram_plot {
+        artifacts.push(SvgArtifact {
+            path: path.clone(),
+            contents: render_styled_svg(&SvgSpec {
+                title: format!("{suite_label} performance histogram"),
+                subtitle: "Distribution of ranked case improvements from official evidence."
+                    .to_owned(),
+                accent: suite_accent,
+                metrics: vec![
+                    SvgMetric {
+                        label: "Cases".to_owned(),
+                        value: ranked.len().to_string(),
+                    },
+                    SvgMetric {
+                        label: "Positive".to_owned(),
+                        value: ranked
+                            .iter()
+                            .filter(|case| case.improvement_pct > 0.0)
+                            .count()
+                            .to_string(),
+                    },
+                    SvgMetric {
+                        label: "Negative".to_owned(),
+                        value: ranked
+                            .iter()
+                            .filter(|case| case.improvement_pct <= 0.0)
+                            .count()
+                            .to_string(),
+                    },
+                ],
+                bars: histogram_bars(ranked),
+            }),
+        });
+    }
+
+    if let Some(path) = &options.median_test_performance_plot {
+        artifacts.push(SvgArtifact {
+            path: path.clone(),
+            contents: render_styled_svg(&SvgSpec {
+                title: format!("{suite_label} median test performance"),
+                subtitle: "Median SQLite and target timings from the ranked sample set.".to_owned(),
+                accent: suite_accent,
+                metrics: vec![
+                    SvgMetric {
+                        label: "SQLite median".to_owned(),
+                        value: human_duration_ns(median_sqlite_ns(ranked)),
+                    },
+                    SvgMetric {
+                        label: "Target median".to_owned(),
+                        value: human_duration_ns(median_target_ns(ranked)),
+                    },
+                    SvgMetric {
+                        label: "Median gap".to_owned(),
+                        value: format!("{:.2}%", median_gap(ranked)),
+                    },
+                ],
+                bars: vec![],
+            }),
+        });
+    }
+
+    if let Some(path) = &options.ksloc_plot {
+        artifacts.push(SvgArtifact {
+            path: path.clone(),
+            contents: render_styled_svg(&SvgSpec {
+                title: format!("{suite_label} KSLOC"),
+                subtitle: "Committed report artifact for the paper-data LOC comparison.".to_owned(),
+                accent: suite_accent,
+                metrics: vec![
+                    SvgMetric {
+                        label: "Crate".to_owned(),
+                        value: "redline-testing".to_owned(),
+                    },
+                    SvgMetric {
+                        label: "LOC".to_owned(),
+                        value: "1".to_owned(),
+                    },
+                    SvgMetric {
+                        label: "Updated".to_owned(),
+                        value: options.updated_date.clone(),
+                    },
+                ],
+                bars: vec![],
+            }),
+        });
+    }
+
+    if let Some(path) = &options.jankurai_score_plot {
+        artifacts.push(SvgArtifact {
+            path: path.clone(),
+            contents: render_styled_svg(&SvgSpec {
+                title: format!("{suite_label} Jankurai score"),
+                subtitle: "Score evidence mirrored into a committed chart artifact.".to_owned(),
+                accent: "#8b5cf6",
+                metrics: vec![
+                    SvgMetric {
+                        label: "Suite".to_owned(),
+                        value: options.suite.clone(),
+                    },
+                    SvgMetric {
+                        label: "Cases".to_owned(),
+                        value: summary.total_cases.to_string(),
+                    },
+                    SvgMetric {
+                        label: "Passed".to_owned(),
+                        value: summary.passed_cases.to_string(),
+                    },
+                ],
+                bars: vec![],
+            }),
+        });
+    }
+
+    if let Some(path) = &options.code_shape_plot {
+        artifacts.push(SvgArtifact {
+            path: path.clone(),
+            contents: render_styled_svg(&SvgSpec {
+                title: format!("{suite_label} code shape"),
+                subtitle: "Static chart artifact for the Jankurai comparison block.".to_owned(),
+                accent: "#14b8a6",
+                metrics: vec![
+                    SvgMetric {
+                        label: "Suite".to_owned(),
+                        value: options.suite.clone(),
+                    },
+                    SvgMetric {
+                        label: "Ranked".to_owned(),
+                        value: ranked.len().to_string(),
+                    },
+                    SvgMetric {
+                        label: "Updated".to_owned(),
+                        value: options.updated_date.clone(),
+                    },
+                ],
+                bars: vec![],
+            }),
+        });
+    }
+
+    if let Some(path) = &options.jankurai_comparison_plot {
+        artifacts.push(SvgArtifact {
+            path: path.clone(),
+            contents: render_styled_svg(&SvgSpec {
+                title: format!("{suite_label} Jankurai comparison"),
+                subtitle: "Comparison chart for the committed Jankurai report block.".to_owned(),
+                accent: "#f59e0b",
+                metrics: vec![
+                    SvgMetric {
+                        label: "Suite".to_owned(),
+                        value: options.suite.clone(),
+                    },
+                    SvgMetric {
+                        label: "Total".to_owned(),
+                        value: summary.total_cases.to_string(),
+                    },
+                    SvgMetric {
+                        label: "Skipped".to_owned(),
+                        value: summary.skipped_cases.to_string(),
+                    },
+                ],
+                bars: vec![],
+            }),
+        });
+    }
+
+    let _ = raw_records;
+    artifacts
 }
 
-fn simple_svg(title: &str) -> String {
+fn render_styled_svg(spec: &SvgSpec) -> String {
+    let metrics = spec
+        .metrics
+        .iter()
+        .enumerate()
+        .map(|(index, metric)| {
+            let x = 720 + index as i32 * 148;
+            format!(
+                "<g transform=\"translate({x},36)\"><rect width=\"132\" height=\"76\" rx=\"14\" fill=\"#111827\" stroke=\"{accent}\" stroke-opacity=\"0.38\"/><text x=\"16\" y=\"28\" fill=\"#94a3b8\" font-family=\"Inter,Segoe UI,sans-serif\" font-size=\"12\" letter-spacing=\"0\">{label}</text><text x=\"16\" y=\"56\" fill=\"#f8fafc\" font-family=\"Inter,Segoe UI,sans-serif\" font-size=\"24\" font-weight=\"700\" letter-spacing=\"0\">{value}</text></g>",
+                accent = spec.accent,
+                label = escape_xml(&metric.label),
+                value = escape_xml(&metric.value),
+            )
+        })
+        .collect::<String>();
+
+    let bars = if spec.bars.is_empty() {
+        String::new()
+    } else {
+        render_svg_bars(&spec.bars, spec.accent)
+    };
+
     format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"960\" height=\"240\" viewBox=\"0 0 960 240\">\n  <rect width=\"960\" height=\"240\" fill=\"#0f172a\"/>\n  <text x=\"32\" y=\"82\" fill=\"#e2e8f0\" font-family=\"monospace\" font-size=\"28\">{}</text>\n  <text x=\"32\" y=\"126\" fill=\"#94a3b8\" font-family=\"monospace\" font-size=\"16\">generated by redline-testing</text>\n</svg>\n",
-        escape_xml(title)
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1200\" height=\"360\" viewBox=\"0 0 1200 360\" role=\"img\" aria-labelledby=\"title desc\"><title id=\"title\">{title}</title><desc id=\"desc\">{subtitle}</desc><rect width=\"1200\" height=\"360\" fill=\"#0b1220\"/><rect x=\"20\" y=\"20\" width=\"1160\" height=\"320\" rx=\"20\" fill=\"#0f172a\" stroke=\"#1f2937\"/><path d=\"M 36 132 H 1164\" stroke=\"#1f2937\" stroke-width=\"1\"/><text x=\"48\" y=\"66\" fill=\"#f8fafc\" font-family=\"Inter,Segoe UI,sans-serif\" font-size=\"34\" font-weight=\"700\" letter-spacing=\"0\">{title}</text><text x=\"48\" y=\"96\" fill=\"#94a3b8\" font-family=\"Inter,Segoe UI,sans-serif\" font-size=\"15\" letter-spacing=\"0\">{subtitle}</text>{metrics}{bars}<text x=\"1152\" y=\"336\" fill=\"#64748b\" text-anchor=\"end\" font-family=\"Inter,Segoe UI,sans-serif\" font-size=\"12\" letter-spacing=\"0\">generated by redline-testing</text></svg>\n",
+        title = escape_xml(&spec.title),
+        subtitle = escape_xml(&spec.subtitle),
+        metrics = metrics,
+        bars = bars
     )
+}
+
+fn render_svg_bars(bars: &[SvgBar], accent: &str) -> String {
+    let max_value = bars
+        .iter()
+        .map(|bar| bar.value)
+        .fold(0.0f64, f64::max)
+        .max(1.0);
+    let count = bars.len().max(1) as f64;
+    let width = 1110.0 / count;
+    let mut out = String::new();
+    for (index, bar) in bars.iter().enumerate() {
+        let bar_height = (bar.value / max_value).clamp(0.05, 1.0) * 92.0;
+        let x = 45.0 + index as f64 * width;
+        let y = 296.0 - bar_height;
+        let rect_width = (width - 24.0).max(60.0);
+        let text_x = rect_width / 2.0;
+        out.push_str(&format!(
+            "<g transform=\"translate({x:.1},0)\"><rect x=\"0\" y=\"{y:.1}\" width=\"{rect_width:.1}\" height=\"{bar_height:.1}\" rx=\"12\" fill=\"{accent}\" fill-opacity=\"0.88\"/><text x=\"{text_x:.1}\" y=\"{value_y:.1}\" fill=\"#e2e8f0\" text-anchor=\"middle\" font-family=\"Inter,Segoe UI,sans-serif\" font-size=\"13\" font-weight=\"600\" letter-spacing=\"0\">{value}</text><text x=\"{text_x:.1}\" y=\"320\" fill=\"#94a3b8\" text-anchor=\"middle\" font-family=\"Inter,Segoe UI,sans-serif\" font-size=\"12\" letter-spacing=\"0\">{label}</text></g>",
+            x = x,
+            y = y,
+            rect_width = rect_width,
+            bar_height = bar_height,
+            accent = accent,
+            text_x = text_x,
+            value_y = y - 10.0,
+            value = escape_xml(&bar.value_label),
+            label = escape_xml(&bar.label),
+        ));
+    }
+    out
 }
 
 fn escape_xml(input: &str) -> String {
@@ -890,6 +1424,7 @@ fn verify_existing(
     provenance_out: &Path,
     readme_out: &Path,
     rendered: &RenderedReport,
+    svg_artifacts: &[SvgArtifact],
 ) -> Result<()> {
     verify_text(input, &rendered.raw)?;
     verify_text(raw_out, &rendered.raw)?;
@@ -899,6 +1434,9 @@ fn verify_existing(
     verify_text(manifest_out, &rendered.manifest)?;
     verify_text(provenance_out, &rendered.provenance)?;
     verify_text(readme_out, &rendered.readme)?;
+    for artifact in svg_artifacts {
+        verify_text(&artifact.path, &artifact.contents)?;
+    }
     Ok(())
 }
 
@@ -945,6 +1483,15 @@ fn median(values: impl Iterator<Item = u128>) -> u128 {
     let mut values = values.collect::<Vec<_>>();
     values.sort_unstable();
     values[values.len() / 2]
+}
+
+fn median_u64(values: impl Iterator<Item = u64>) -> Option<u64> {
+    let mut values = values.collect::<Vec<_>>();
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_unstable();
+    Some(values[values.len() / 2])
 }
 
 fn improvement_pct(sqlite_median_ns: u128, redline_median_ns: u128) -> f64 {
@@ -1002,4 +1549,131 @@ fn git_dirty() -> bool {
 
 fn normalized_command_line() -> Vec<String> {
     std::env::args().filter(|arg| arg != "--check").collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "redline-testing-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        path
+    }
+
+    #[test]
+    fn report_requires_official_evidence_for_committed_artifacts() {
+        let root = temp_path("report-gate");
+        fs::create_dir_all(&root).expect("temp root");
+        let input = root.join("raw.jsonl");
+        fs::write(&input, "").expect("raw");
+        let readme = root.join("README.md");
+        let out_dir = root.join("out");
+        let err = generate(ReportOptions {
+            suite: "sqlite_parity".to_owned(),
+            input,
+            official_evidence: None,
+            local_diagnostics: false,
+            out_dir,
+            readme,
+            plot: None,
+            ksloc_plot: None,
+            performance_histogram_plot: None,
+            median_test_performance_plot: None,
+            jankurai_score: None,
+            jankurai_comparison: None,
+            jankurai_comparison_plot: None,
+            jankurai_score_plot: None,
+            code_shape_plot: None,
+            updated_date: "2026-05-24".to_owned(),
+            expected_repetitions: None,
+            expected_warmup: None,
+            check: false,
+        })
+        .expect_err("missing official evidence should fail");
+        assert!(err.to_string().contains("--official-evidence"), "{err:?}");
+    }
+
+    #[test]
+    fn styled_svg_renderer_is_shared_and_suite_aware() {
+        let svg = render_styled_svg(&SvgSpec {
+            title: "Beyond-SQLite feature progress".to_owned(),
+            subtitle: "Coverage evidence for the backlog.".to_owned(),
+            accent: "#f59e0b",
+            metrics: vec![SvgMetric {
+                label: "Coverage".to_owned(),
+                value: "33.33%".to_owned(),
+            }],
+            bars: vec![SvgBar {
+                label: "passed".to_owned(),
+                value: 4.0,
+                value_label: "4".to_owned(),
+            }],
+        });
+        assert!(svg.contains("<svg xmlns=\"http://www.w3.org/2000/svg\""));
+        assert!(svg.contains("Beyond-SQLite feature progress"));
+        assert!(svg.contains("Inter,Segoe UI,sans-serif"));
+        assert!(svg.contains("generated by redline-testing"));
+        assert!(svg.contains("fill=\"#f59e0b\""));
+        assert!(svg.contains("passed"));
+    }
+
+    #[test]
+    fn beyond_sqlite_plot_uses_feature_progress_copy() {
+        let summary = SummaryJson {
+            suite: "beyond_sqlite".to_owned(),
+            total_cases: 4,
+            passed_cases: 2,
+            failed_cases: 0,
+            skipped_cases: 2,
+            elapsed_ns: 0,
+            measured_samples: 2,
+            warmup_samples: 0,
+            ranked_cases: 2,
+            repetitions: 1,
+            warmup: 0,
+        };
+        let artifacts = build_svg_artifacts(
+            &summary,
+            &[],
+            &[],
+            &ReportOptions {
+                suite: "beyond_sqlite".to_owned(),
+                input: PathBuf::from("input.jsonl"),
+                official_evidence: Some(PathBuf::from("official-evidence.json")),
+                local_diagnostics: true,
+                out_dir: PathBuf::from("out"),
+                readme: PathBuf::from("README.md"),
+                plot: Some(PathBuf::from("feature-progress.svg")),
+                ksloc_plot: None,
+                performance_histogram_plot: None,
+                median_test_performance_plot: None,
+                jankurai_score: None,
+                jankurai_comparison: None,
+                jankurai_comparison_plot: None,
+                jankurai_score_plot: None,
+                code_shape_plot: None,
+                updated_date: "2026-05-24".to_owned(),
+                expected_repetitions: None,
+                expected_warmup: None,
+                check: false,
+            },
+        );
+        assert_eq!(artifacts.len(), 1);
+        assert!(artifacts[0].contents.contains("feature progress"));
+        assert!(
+            artifacts[0]
+                .contents
+                .contains("Coverage evidence for the beyond-SQLite backlog.")
+        );
+    }
 }

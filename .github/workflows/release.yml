@@ -11,9 +11,14 @@ permissions:
   id-token: write
   attestations: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   release:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -24,10 +29,15 @@ jobs:
           components: rustfmt
       - name: Install just
         run: cargo install just --locked
+      - name: Verify release tag
+        run: |
+          test "${GITHUB_REF_TYPE:-}" = "tag"
+          test -n "${GITHUB_REF_NAME:-}"
+          git describe --tags --exact-match >/dev/null
       - name: Test
         run: scripts/ci-local.sh pr-ci
       - name: Build package
-        run: just release-local
+        run: scripts/ci-local.sh release
       - name: Attest package
         uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45
         with:

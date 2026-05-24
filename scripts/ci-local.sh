@@ -14,9 +14,13 @@ fi
 
 usage() {
     cat >&2 <<'USAGE'
-usage: scripts/ci-local.sh {pr-ci}
+usage: scripts/ci-local.sh {pr-ci|security|audit|release|doctor}
 
-  pr-ci  run the exact local mirror of .github/workflows/ci.yml
+  pr-ci    run the exact local mirror of .github/workflows/ci.yml
+  security run the repository security lane
+  audit    run the repository audit lane
+  release  run the release packaging lane
+  doctor   run the workflow and hook sanity checks
 USAGE
 }
 
@@ -27,10 +31,19 @@ fi
 
 case "$1" in
     pr-ci)
-        rtk cargo fmt --check
-        rtk cargo check --locked
-        rtk cargo test --locked
-        rtk just release-local
+        bash "$repo_root/ops/ci/pr-ci.sh"
+        ;;
+    security)
+        bash "$repo_root/ops/ci/security.sh"
+        ;;
+    audit)
+        bash "$repo_root/ops/ci/jankurai-audit.sh"
+        ;;
+    release)
+        bash "$repo_root/ops/ci/release.sh"
+        ;;
+    doctor)
+        bash "$repo_root/scripts/ci-doctor.sh"
         ;;
     -h|--help|help)
         usage
