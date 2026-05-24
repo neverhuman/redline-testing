@@ -40,8 +40,14 @@ const MANIFEST: &str = include_str!("../../corpus/beyond_sqlite/generated_manife
 /// / .separator |` setup baked into per-case sqlite_parity stdin so target
 /// shell output is byte-comparable with psql's `-A -t -F | -P null=NULL`
 /// formatting through the normalizer pipeline.
+///
+/// `PRAGMA case_sensitive_like = 1` flips LIKE from its SQLite default
+/// (ASCII-fold) to Postgres' SQL-standard case-sensitive behaviour. The
+/// beyond-SQLite oracle compares against PG, so case-sensitive LIKE is
+/// what we want for cases like `LIKE_VS_ILIKE_ASCII`. ILIKE is
+/// independent of this pragma and continues to fold case.
 const SQLITE_FORMATTING_PREAMBLE: &str =
-    ".mode list\n.headers off\n.separator |\n.nullvalue NULL\n";
+    ".mode list\n.headers off\n.separator |\n.nullvalue NULL\nPRAGMA case_sensitive_like = 1;\n";
 
 #[derive(Debug, Clone, Default)]
 pub struct RunCasesOptions {
