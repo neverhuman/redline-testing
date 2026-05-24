@@ -84,7 +84,7 @@ just release-local
 ```
 
 This builds `target/release/redline-testing`, writes
-`dist/redline-testing-0.1.2-linux-x86_64.tar.gz`, and writes the matching
+`dist/redline-testing-0.1.3-linux-x86_64.tar.gz`, and writes the matching
 `.sha256` file. The tarball contains:
 
 ```text

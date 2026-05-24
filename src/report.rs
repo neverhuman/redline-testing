@@ -129,6 +129,13 @@ struct ProvenanceJson {
     output_file_hashes: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone)]
+struct EvidenceVersions {
+    runner_version: String,
+    target_version: String,
+    sqlite_version: String,
+}
+
 #[derive(Debug)]
 struct RankedCase {
     case_id: String,
@@ -224,6 +231,11 @@ pub fn generate(options: ReportOptions) -> Result<()> {
     }
 
     let ranked = rank_cases(&raw_records);
+    let evidence_versions = options
+        .official_evidence
+        .as_deref()
+        .map(read_official_evidence_versions)
+        .transpose()?;
     let total_cases = raw_records
         .iter()
         .map(|record| record.case_id.clone())
@@ -274,7 +286,13 @@ pub fn generate(options: ReportOptions) -> Result<()> {
     let summary_json = serde_json::to_string_pretty(&summary)? + "\n";
     let ranked_csv = ranked_csv(&ranked);
     let ksloc_csv = ksloc_csv();
-    let report_block = render_report_block(&summary, &ranked, &raw_records, &options);
+    let report_block = render_report_block(
+        &summary,
+        &ranked,
+        &raw_records,
+        &options,
+        evidence_versions.as_ref(),
+    );
     let metrics_block = render_metrics_block(&options);
     let mut readme = fs::read_to_string(&options.readme)
         .with_context(|| format!("read README {}", options.readme.display()))?;
@@ -465,6 +483,72 @@ fn validate_official_evidence_binding(
         );
     }
     Ok(())
+}
+
+fn read_official_evidence_versions(official_evidence: &Path) -> Result<EvidenceVersions> {
+    let text = fs::read_to_string(official_evidence)
+        .with_context(|| format!("read official evidence {}", official_evidence.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .with_context(|| format!("parse official evidence {}", official_evidence.display()))?;
+    official_evidence_versions_from_value(official_evidence, &value)
+}
+
+fn official_evidence_versions_from_value(
+    official_evidence: &Path,
+    value: &serde_json::Value,
+) -> Result<EvidenceVersions> {
+    let schema_version = value
+        .get("schema_version")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    match schema_version {
+        "redline-testing-official-evidence-v1" => Ok(EvidenceVersions {
+            runner_version: evidence_version(value, official_evidence, "runner")?,
+            target_version: evidence_version(value, official_evidence, "target")?,
+            sqlite_version: evidence_version(value, official_evidence, "sqlite")?,
+        }),
+        "redline-testing-official-evidence-processed-v1" => Ok(EvidenceVersions {
+            runner_version: evidence_version(
+                value.get("official_evidence").unwrap_or(value),
+                official_evidence,
+                "runner",
+            )?,
+            target_version: evidence_version(
+                value.get("official_evidence").unwrap_or(value),
+                official_evidence,
+                "target",
+            )?,
+            sqlite_version: evidence_version(
+                value.get("official_evidence").unwrap_or(value),
+                official_evidence,
+                "sqlite",
+            )?,
+        }),
+        other => bail!(
+            "unsupported official evidence schema_version {:?} in {}",
+            other,
+            official_evidence.display()
+        ),
+    }
+}
+
+fn evidence_version(
+    value: &serde_json::Value,
+    official_evidence: &Path,
+    section: &str,
+) -> Result<String> {
+    value
+        .get(section)
+        .and_then(|entry| entry.get("version"))
+        .and_then(|value| value.as_str())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "official evidence missing {}.version in {}",
+                section,
+                official_evidence.display()
+            )
+        })
 }
 
 fn processed_suite_raw_hash(value: &serde_json::Value, suite: &str) -> Result<String> {
@@ -928,6 +1012,7 @@ fn render_report_block(
     ranked: &[RankedCase],
     raw_records: &[RawRecord],
     options: &ReportOptions,
+    evidence_versions: Option<&EvidenceVersions>,
 ) -> String {
     let suite_label = suite_display_name(&options.suite);
     let suite_subject = suite_subject(&options.suite);
@@ -998,6 +1083,14 @@ fn render_report_block(
                 faster_cases
             ));
         }
+    }
+    if let Some(evidence_versions) = evidence_versions {
+        block.push_str(&format!(
+            "**Benchmark metadata:** RedlineDB target version **{}**, SQLite reference version **{}**, redline-testing runner version **{}**.\n\n",
+            evidence_versions.target_version,
+            evidence_versions.sqlite_version,
+            evidence_versions.runner_version
+        ));
     }
     if let Some(plot) = &options.plot {
         block.push_str(&format!(
@@ -1570,6 +1663,131 @@ mod tests {
         path
     }
 
+    fn write_text(path: &Path, text: &str) {
+        fs::write(path, text).expect("write test file");
+    }
+
+    fn sample_raw_record() -> String {
+        serde_json::json!({
+            "case_id": "00001",
+            "name": "BENCHMARK_CASE",
+            "case_file": "case.rs",
+            "priority": "P0",
+            "profile": "memory",
+            "category": "SQL_FUNCTIONS",
+            "sample_role": "measured:1",
+            "repetition_index": 1,
+            "status": "passed",
+            "reference_elapsed_ns": 10_000u128,
+            "target_elapsed_ns": 5_000u128,
+            "memory_status": "unavailable"
+        })
+        .to_string()
+    }
+
+    fn sample_official_evidence_raw(
+        raw_sha256: &str,
+        runner_version: &str,
+        target_version: &str,
+        sqlite_version: &str,
+    ) -> String {
+        serde_json::json!({
+            "schema_version": "redline-testing-official-evidence-v1",
+            "runner": {
+                "binary_path": "/tmp/redline-testing",
+                "binary_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "release_binary_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "release_tarball_sha256": null,
+                "version": runner_version,
+            },
+            "target": {
+                "path": "/tmp/redlinedb",
+                "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "version": target_version,
+            },
+            "sqlite": {
+                "path": "/tmp/sqlite3",
+                "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                "version": sqlite_version,
+            },
+            "suites": {
+                "sqlite_parity": {
+                    "name": "sqlite_parity",
+                    "total": 1,
+                    "passed": 1,
+                    "failed": 0,
+                    "skipped": 0,
+                    "raw_path": "raw.jsonl",
+                    "summary_path": "summary.json",
+                    "ranked_path": "ranked.csv",
+                    "manifest_path": "manifest.json",
+                    "provenance_path": "provenance.json",
+                }
+            },
+            "status": "passed",
+            "command_line": ["redline-testing", "run"],
+            "generated_at_unix_ms": 1u128,
+            "output_file_hashes": {
+                "raw.jsonl": raw_sha256,
+            },
+            "workers": "1",
+            "repetitions": 1,
+            "warmup": 0,
+            "memory_samples": false,
+            "tmp_root": "tmp",
+        })
+        .to_string()
+    }
+
+    fn sample_official_evidence_processed(raw_sha256: &str) -> String {
+        serde_json::json!({
+            "schema_version": "redline-testing-official-evidence-processed-v1",
+            "runner": {
+                "binary_path": "/tmp/redline-testing/bin/redline-testing",
+                "binary_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "release_binary_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "release_tarball_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "version": "redline-testing evidence runner 9.9.9",
+            },
+            "target": {
+                "path": "/tmp/redlinedb",
+                "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                "version": "redlinedb evidence target 8.8.8",
+            },
+            "sqlite": {
+                "path": "/tmp/sqlite3",
+                "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "version": "sqlite evidence 3.44.0",
+            },
+            "official_evidence": {
+                "schema_version": "redline-testing-official-evidence-v1",
+                "runner": {
+                    "binary_path": "/tmp/redline-testing/bin/redline-testing",
+                    "binary_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "release_binary_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "release_tarball_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                    "version": "redline-testing evidence runner 9.9.9",
+                },
+                "target": {
+                    "path": "/tmp/redlinedb",
+                    "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                    "version": "redlinedb evidence target 8.8.8",
+                },
+                "sqlite": {
+                    "path": "/tmp/sqlite3",
+                    "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                    "version": "sqlite evidence 3.44.0",
+                },
+            },
+            "suite_summaries": {
+                "sqlite_parity": {
+                    "raw_sha256": raw_sha256,
+                }
+            }
+        })
+        .to_string()
+    }
+
     #[test]
     fn report_requires_official_evidence_for_committed_artifacts() {
         let root = temp_path("report-gate");
@@ -1601,6 +1819,124 @@ mod tests {
         })
         .expect_err("missing official evidence should fail");
         assert!(err.to_string().contains("--official-evidence"), "{err:?}");
+    }
+
+    #[test]
+    fn report_uses_official_evidence_versions_in_readme_block() {
+        let root = temp_path("report-evidence");
+        fs::create_dir_all(&root).expect("temp root");
+        let input = root.join("raw.jsonl");
+        let raw = serde_json::json!({
+            "case_id": "00001",
+            "name": "CASE_ONE",
+            "case_file": "case_one.sql",
+            "priority": "P0",
+            "profile": "memory",
+            "category": "SMOKE",
+            "sample_role": "measured:1",
+            "repetition_index": 1,
+            "status": "passed",
+            "reference_elapsed_ns": 10u128,
+            "target_elapsed_ns": 5u128,
+        });
+        let raw_text = format!("{}\n", serde_json::to_string(&raw).expect("raw json"));
+        fs::write(&input, &raw_text).expect("raw");
+        let evidence = root.join("official-evidence.processed.json");
+        let evidence_json = serde_json::json!({
+            "schema_version": "redline-testing-official-evidence-processed-v1",
+            "runner": {
+                "binary_path": "/tmp/redline-testing/bin/redline-testing",
+                "binary_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "release_binary_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "release_tarball_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "version": "redline-testing 0.1.3",
+            },
+            "target": {
+                "path": "/tmp/redlinedb",
+                "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "version": "redlinedb v2.0.6 (SQLite 3.45.1 compatibility)",
+            },
+            "sqlite": {
+                "path": "/tmp/sqlite3",
+                "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                "version": "3.53.1 2026-05-05 10:34:17 example (64-bit)",
+            },
+            "suite_summaries": {
+                "sqlite_parity": {
+                    "raw_sha256": sha256_hex(&raw_text),
+                }
+            },
+            "status": "passed",
+            "command_line": ["redline-testing", "report"],
+            "generated_at_unix_ms": 1u128,
+            "output_file_hashes": {
+                "raw.jsonl": sha256_hex(&raw_text),
+            },
+            "workers": "auto",
+            "repetitions": 1,
+            "warmup": 0,
+            "memory_samples": false,
+            "tmp_root": "/tmp/redline-testing",
+            "source_path": "target/redline-testing/official-evidence.json",
+            "validated_at_unix_ms": 2u128,
+            "runner_expected_binary_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "runner_observed_binary_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "source_sha256": sha256_hex(&raw_text),
+        });
+        fs::write(
+            &evidence,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&evidence_json).expect("evidence json")
+            ),
+        )
+        .expect("evidence");
+        let readme = root.join("README.md");
+        fs::write(
+            &readme,
+            "# Report\n\n<!-- sqlite-parity-report:begin -->\n<!-- sqlite-parity-report:end -->\n",
+        )
+        .expect("readme");
+        let out_dir = root.join("out");
+        generate(ReportOptions {
+            suite: "sqlite_parity".to_owned(),
+            input,
+            official_evidence: Some(evidence),
+            local_diagnostics: false,
+            out_dir,
+            readme: readme.clone(),
+            plot: None,
+            ksloc_plot: None,
+            performance_histogram_plot: None,
+            median_test_performance_plot: None,
+            jankurai_score: None,
+            jankurai_comparison: None,
+            jankurai_comparison_plot: None,
+            jankurai_score_plot: None,
+            code_shape_plot: None,
+            updated_date: "2026-05-24".to_owned(),
+            expected_repetitions: Some(1),
+            expected_warmup: Some(0),
+            check: false,
+        })
+        .expect("report should generate");
+        let rendered = fs::read_to_string(readme).expect("readme rendered");
+        assert!(
+            rendered.contains(
+                "**Benchmark metadata:** RedlineDB target version **redlinedb v2.0.6 (SQLite 3.45.1 compatibility)**, SQLite reference version **3.53.1 2026-05-05 10:34:17 example (64-bit)**, redline-testing runner version **redline-testing 0.1.3**."
+            ),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "SQLite reference version **3.53.1 2026-05-05 10:34:17 example (64-bit)**"
+            ),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("redline-testing runner version **redline-testing 0.1.3**"),
+            "{rendered}"
+        );
     }
 
     #[test]
