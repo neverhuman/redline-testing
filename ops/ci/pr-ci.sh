@@ -8,8 +8,12 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 cd "$repo_root"
 
+# Pre-flight: keep `.jankurai/audit-policy.toml` and `agent/audit-policy.toml`
+# in sync. The two are read by different tooling layers; drift silently
+# changes the active audit policy from what's documented in .jankurai/.
+ci_run scripts/check_audit_policy_mirror.sh
+
 ci_run cargo fmt --check
 ci_run cargo check --locked
 ci_run cargo test --locked
 ci_run just release-local
-

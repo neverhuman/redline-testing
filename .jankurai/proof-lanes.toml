@@ -14,3 +14,26 @@ commands = [
 commands = [
   "rtk scripts/ci-local.sh pr-ci",
 ]
+
+# Postgres-backed beyond-SQLite oracle. Optional Cargo feature pulls
+# `postgresql_embedded` into the build. The lane spawns one embedded
+# postmaster on /dev/shm and self-compares each beyond-SQLite case via
+# psql↔psql; cases that don't pass are rejected from the corpus.
+[lane.beyond-postgres-reference]
+commands = [
+  "rtk cargo test --locked --features pg-embedded --test beyond_sqlite_oracle -- --ignored",
+]
+
+# Generator drift detector for matrix-product shards. `xtask generate --check`
+# re-expands the YAML rule files and fails if the on-disk shard JSON drifts.
+[lane.corpus-generator]
+commands = [
+  "rtk cargo run --locked -p xtask -- generate --check",
+]
+
+# Ship-gate: drives the reference self-compare end-to-end across every
+# shipping shard. New cases must clear this lane before they land on `main`.
+[lane.ship-gate]
+commands = [
+  "rtk cargo run --locked -p xtask -- ship-gate",
+]

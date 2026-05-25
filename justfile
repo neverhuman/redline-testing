@@ -1,8 +1,35 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+# Default recipe runs the same lane CI runs.
+default: pr-ci
+
+# Fast format + compile check (matches the start of pr-ci, no test run).
+check:
+    cargo fmt --check
+    cargo check --locked --all-targets
+
+# Run the Rust test suite (28 integration + unit tests).
+test:
+    cargo test --locked
+
+# Full verification mirror of GitHub Actions ci.yml.
+verify: pr-ci
+
 pr-ci:
     scripts/ci-local.sh pr-ci
 
+# Build + package the release tarball + manifest. Refactored to invoke
+# scripts/release-package.sh so the artifact_hashes set is glob-driven (every
+# file under dist/<package>/ is enumerated, not hand-listed). New corpora /
+# schemas / templates auto-appear without editing this recipe.
 release-local:
-    cargo build --release --locked
-    version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"; test -n "$version"; target_name="linux-x86_64"; package="redline-testing-${version}-${target_name}"; rm -rf dist/"$package"; mkdir -p dist/"$package"/bin dist/"$package"/corpus/sqlite_parity dist/"$package"/metadata/beyond_sqlite dist/"$package"/schemas dist/"$package"/templates; cp target/release/redline-testing dist/"$package"/bin/redline-testing; cp corpus/sqlite_parity/generated_manifest.json dist/"$package"/corpus/sqlite_parity/generated_manifest.json; cp metadata/beyond_sqlite/features.json dist/"$package"/metadata/beyond_sqlite/features.json; cp schemas/*.json dist/"$package"/schemas/; cp templates/*.md dist/"$package"/templates/; binary_sha="$(sha256sum dist/"$package"/bin/redline-testing | awk '{ print $1 }')"; corpus_sha="$(sha256sum dist/"$package"/corpus/sqlite_parity/generated_manifest.json | awk '{ print $1 }')"; beyond_sha="$(sha256sum dist/"$package"/metadata/beyond_sqlite/features.json | awk '{ print $1 }')"; raw_schema_sha="$(sha256sum dist/"$package"/schemas/raw-record.schema.json | awk '{ print $1 }')"; release_schema_sha="$(sha256sum dist/"$package"/schemas/release-manifest.schema.json | awk '{ print $1 }')"; template_sha="$(sha256sum dist/"$package"/templates/README.sqlite-parity.md | awk '{ print $1 }')"; commit="$(git rev-parse HEAD 2>/dev/null || printf unknown)"; tag="${GITHUB_REF_NAME:-$(git describe --tags --exact-match 2>/dev/null || printf v%s "$version")}"; printf '{\n  "name": "redline-testing",\n  "version": "%s",\n  "target": "%s",\n  "release_commit": "%s",\n  "release_tag": "%s",\n  "binary": "bin/redline-testing",\n  "binary_sha256": "%s",\n  "tarball_sha256_source": ".sha256 sidecar",\n  "artifact_hashes": {\n    "corpus/sqlite_parity/generated_manifest.json": "%s",\n    "metadata/beyond_sqlite/features.json": "%s",\n    "schemas/raw-record.schema.json": "%s",\n    "schemas/release-manifest.schema.json": "%s",\n    "templates/README.sqlite-parity.md": "%s"\n  },\n  "generated_by": "just release-local"\n}\n' "$version" "$target_name" "$commit" "$tag" "$binary_sha" "$corpus_sha" "$beyond_sha" "$raw_schema_sha" "$release_schema_sha" "$template_sha" > dist/"$package"/release-manifest.json; tar -C dist --sort=name --owner=0 --group=0 --numeric-owner -czf dist/"$package".tar.gz "$package"; sha256sum dist/"$package".tar.gz > dist/"$package".tar.gz.sha256; cp dist/"$package"/release-manifest.json dist/release-manifest.json
+    scripts/release-package.sh
+
+# Run the corpus generator's drift check (re-emits matrix-product shards and
+# fails on diff). Wired into pr-ci via xtask alongside the existing checks.
+generate-check:
+    cargo run -p xtask --release -- generate --check
+
+# Validate every shard under corpus/sqlite_parity/cases/ against sqlite3.
+ship-gate:
+    cargo run -p xtask --release -- ship-gate

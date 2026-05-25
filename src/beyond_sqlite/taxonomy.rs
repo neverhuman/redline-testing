@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::sqlite_parity::RunSummary;
 
-const FEATURES: &str = include_str!("../metadata/beyond_sqlite/features.json");
+const FEATURES: &str = include_str!("../../metadata/beyond_sqlite/features.json");
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Feature {
@@ -80,6 +80,16 @@ struct BeyondSummary {
     skipped_features: usize,
     coverage_pct: f64,
     elapsed_ns: u128,
+    /// Target-compare lane counts (psql↔target_bin compare for cases that
+    /// passed the psql self-compare). Zero when the lane didn't run.
+    #[serde(default)]
+    target_total: usize,
+    #[serde(default)]
+    target_passed: usize,
+    #[serde(default)]
+    target_failed: usize,
+    #[serde(default)]
+    target_skipped: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -171,30 +181,131 @@ pub fn run(config: RunConfig) -> Result<RunSummary> {
         raw.push('\n');
     }
 
-    fs::write(&config.output, &raw)
+    // Executable-oracle layer: append per-case outcomes from
+    // corpus/beyond_sqlite/generated_manifest.json. When the manifest is
+    // empty (commit 5 baseline) this is a no-op. When Postgres is
+    // unavailable, every case emits a `skipped` record with a diagnostic;
+    // we never let oracle failures break the suite.
+    //
+    // Two record streams are emitted:
+    //   * `profile: beyond_sqlite_oracle` — psql self-compare (ship gate)
+    //   * `profile: beyond_sqlite_target` — psql↔target compare. Always
+    //     attempted when the target binary path resolves; the target lane is
+    //     emitted only for cases whose self-compare passed (so we don't
+    //     attribute reference instability to the target).
+    let (oracle_summary, oracle_outcomes) =
+        super::oracle::run_cases_with(super::oracle::RunCasesOptions {
+            target_bin: Some(config.target_bin.clone()),
+        })
+        .unwrap_or((
+            super::oracle::OracleSummary {
+                total: 0,
+                passed: 0,
+                skipped_unavailable: 0,
+                skipped_feature_missing: 0,
+                failed: 0,
+                target_total: 0,
+                target_passed: 0,
+                target_failed: 0,
+                target_skipped: 0,
+            },
+            Vec::new(),
+        ));
+    let mut oracle_raw = String::new();
+    for outcome in &oracle_outcomes {
+        let record = serde_json::json!({
+            "suite": "beyond_sqlite",
+            "case_id": format!("BEYOND-CASE-{:05}", outcome.case_id),
+            "name": outcome.name,
+            "case_file": "corpus/beyond_sqlite/generated_manifest.json",
+            "priority": "P0",
+            "profile": "beyond_sqlite_oracle",
+            "category": &outcome.category,
+            "sample_index": 0,
+            "repetition_index": 1,
+            "sample_role": "measured:1",
+            "reference_engine": "postgres",
+            "target_engine": "postgres",
+            "feature_rank": outcome.feature_rank,
+            "status": outcome.status,
+            "diagnostic": outcome.diagnostic,
+            "reference_elapsed_ns": 0,
+            "target_elapsed_ns": 0,
+            "memory_status": "not_run",
+        });
+        oracle_raw.push_str(&record.to_string());
+        oracle_raw.push('\n');
+
+        // Target-vs-reference record. Always emitted when the target lane ran,
+        // even on skip/fail — downstream agents need to see the redlinedb
+        // outputs to triage.
+        if let Some(t) = outcome.target.as_ref() {
+            let target_record = serde_json::json!({
+                "suite": "beyond_sqlite",
+                "case_id": format!("BEYOND-CASE-{:05}", outcome.case_id),
+                "name": outcome.name,
+                "case_file": "corpus/beyond_sqlite/generated_manifest.json",
+                "priority": "P0",
+                "profile": "beyond_sqlite_target",
+                "category": &outcome.category,
+                "sample_index": 0,
+                "repetition_index": 1,
+                "sample_role": "measured:1",
+                "reference_engine": "postgres",
+                "target_engine": "redlinedb",
+                "feature_rank": outcome.feature_rank,
+                "status": t.status,
+                "diagnostic": t.diagnostic,
+                "reference_exit_code": t.reference_exit,
+                "target_exit_code": t.target_exit,
+                "reference_stdout": t.reference_stdout,
+                "target_stdout": t.target_stdout,
+                "target_stderr_head": t.target_stderr_head,
+                "reference_elapsed_ns": t.reference_elapsed_ns,
+                "target_elapsed_ns": t.target_elapsed_ns,
+                "memory_status": "not_run",
+            });
+            oracle_raw.push_str(&target_record.to_string());
+            oracle_raw.push('\n');
+        }
+    }
+    let mut combined = raw;
+    combined.push_str(&oracle_raw);
+    fs::write(&config.output, &combined)
         .with_context(|| format!("write {}", config.output.display()))?;
     write_artifacts(
         &config,
         &target,
         &postgres_status,
-        &raw,
+        &combined,
         BeyondSummary {
             suite: "beyond_sqlite".to_owned(),
-            total_features: features.len(),
-            passed_features: passed,
-            failed_features: 0,
-            skipped_features: skipped,
-            coverage_pct: pct(passed, features.len()),
+            total_features: features.len() + oracle_summary.total,
+            passed_features: passed + oracle_summary.passed,
+            failed_features: oracle_summary.failed,
+            skipped_features: skipped
+                + oracle_summary.skipped_unavailable
+                + oracle_summary.skipped_feature_missing,
+            coverage_pct: pct(
+                passed + oracle_summary.passed,
+                features.len() + oracle_summary.total,
+            ),
             elapsed_ns: started.elapsed().as_nanos(),
+            target_total: oracle_summary.target_total,
+            target_passed: oracle_summary.target_passed,
+            target_failed: oracle_summary.target_failed,
+            target_skipped: oracle_summary.target_skipped,
         },
         &features,
     )?;
 
     Ok(RunSummary {
-        total: features.len(),
-        passed,
-        failed: 0,
-        skipped,
+        total: features.len() + oracle_summary.total,
+        passed: passed + oracle_summary.passed,
+        failed: oracle_summary.failed,
+        skipped: skipped
+            + oracle_summary.skipped_unavailable
+            + oracle_summary.skipped_feature_missing,
         elapsed: Duration::from_nanos(started.elapsed().as_nanos().min(u64::MAX as u128) as u64),
         slowest: Vec::new(),
     })
