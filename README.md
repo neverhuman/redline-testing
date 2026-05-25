@@ -1,7 +1,9 @@
 # redline-testing
 
 [![CI](https://github.com/neverhuman/redline-testing/actions/workflows/ci.yml/badge.svg)](https://github.com/neverhuman/redline-testing/actions/workflows/ci.yml)
-[![Jankurai](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/neverhuman/redline-testing/main/agent/jankurai-badge.json)](agent/repo-score.json)
+<!-- jankurai-score-badge:begin -->
+[![Jankurai score: 38/100 advisory](https://img.shields.io/badge/jankurai-38%2F100%20advisory-red)](agent/repo-score.json)
+<!-- jankurai-score-badge:end -->
 
 Conformance, benchmark, and SQLite-parity test harness for **any SQLite-compatible database**.
 Point `--target-bin` at your binary; the runner does the rest.

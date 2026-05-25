@@ -30,10 +30,10 @@ jobs:
       - name: Run local CI mirror
         run: scripts/ci-local.sh pr-ci
 
-  # Jankurai-badge lane: regenerates agent/jankurai-badge.json from the
-  # committed agent/repo-score.json and commits it back to main. Runs only on
-  # push to main so PRs from forks never need contents:write. The [skip ci]
-  # annotation on the auto-commit prevents a loop.
+  # Jankurai-badge lane: extracts the numeric score from agent/repo-score.json,
+  # updates the <!-- jankurai-score-badge:begin/end --> section in README.md,
+  # and commits it back to main. Runs only on push to main so PRs from forks
+  # never need contents:write. The [skip ci] annotation prevents a loop.
   jankurai-badge:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-24.04
@@ -45,22 +45,47 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
-      - name: Generate badge JSON from repo-score
+      - name: Update jankurai score badge in README
         run: |
-          level=$(jq -r '.observed_conformance_level' agent/repo-score.json)
-          case "$level" in
-            HL3) color=green ;;
-            HL2) color=yellow ;;
-            HL1) color=orange ;;
-            *)   color=red ;;
-          esac
-          jq -n --arg msg "$level" --arg color "$color" \
-            '{"schemaVersion":1,"label":"jankurai","message":$msg,"color":$color}' \
-            > agent/jankurai-badge.json
+          python3 - <<'PYEOF'
+          import re, json
+
+          with open("agent/repo-score.json") as f:
+              data = json.load(f)
+          score = data.get("score", 0)
+
+          if score >= 80:
+              color = "green"
+          elif score >= 60:
+              color = "yellowgreen"
+          elif score >= 40:
+              color = "orange"
+          else:
+              color = "red"
+
+          encoded = f"{score}%2F100%20advisory"
+          badge_url = f"https://img.shields.io/badge/jankurai-{encoded}-{color}"
+          badge_md = f"[![Jankurai score: {score}/100 advisory]({badge_url})](agent/repo-score.json)"
+
+          with open("README.md") as f:
+              content = f.read()
+
+          new_content = re.sub(
+              r"<!-- jankurai-score-badge:begin -->.*?<!-- jankurai-score-badge:end -->",
+              f"<!-- jankurai-score-badge:begin -->\n{badge_md}\n<!-- jankurai-score-badge:end -->",
+              content,
+              flags=re.DOTALL,
+          )
+
+          with open("README.md", "w") as f:
+              f.write(new_content)
+
+          print(f"Badge updated: score={score} color={color}")
+          PYEOF
       - uses: stefanzweifel/git-auto-commit-action@8621da0631e2c0497dd06699c43044d2a1b81eb2
         with:
           commit_message: "chore(badge): update jankurai score badge [skip ci]"
-          file_pattern: agent/jankurai-badge.json
+          file_pattern: README.md
 
   # Beyond-postgres-reference lane: validates corpus/beyond_sqlite cases by
   # running each through psql ↔ psql self-compare. Gated to push/dispatch
