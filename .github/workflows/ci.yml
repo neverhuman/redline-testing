@@ -30,6 +30,38 @@ jobs:
       - name: Run local CI mirror
         run: scripts/ci-local.sh pr-ci
 
+  # Jankurai-badge lane: regenerates agent/jankurai-badge.json from the
+  # committed agent/repo-score.json and commits it back to main. Runs only on
+  # push to main so PRs from forks never need contents:write. The [skip ci]
+  # annotation on the auto-commit prevents a loop.
+  jankurai-badge:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    needs: pr-ci
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Generate badge JSON from repo-score
+        run: |
+          level=$(jq -r '.observed_conformance_level' agent/repo-score.json)
+          case "$level" in
+            HL3) color=green ;;
+            HL2) color=yellow ;;
+            HL1) color=orange ;;
+            *)   color=red ;;
+          esac
+          jq -n --arg msg "$level" --arg color "$color" \
+            '{"schemaVersion":1,"label":"jankurai","message":$msg,"color":$color}' \
+            > agent/jankurai-badge.json
+      - uses: stefanzweifel/git-auto-commit-action@8621da0631e2c0497dd06699c43044d2a1b81eb2
+        with:
+          commit_message: "chore(badge): update jankurai score badge [skip ci]"
+          file_pattern: agent/jankurai-badge.json
+
   # Beyond-postgres-reference lane: validates corpus/beyond_sqlite cases by
   # running each through psql ↔ psql self-compare. Gated to push/dispatch
   # (and the `exhaustive` branch) so PRs from forks don't have to provision

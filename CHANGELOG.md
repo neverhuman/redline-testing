@@ -7,6 +7,8 @@ for the publish + attestation flow.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-05-25
+
 ### Added — exhaustive corpus expansion
 
 - **24 hand-authored SQLite-parity shards** under `corpus/sqlite_parity/cases/`
@@ -72,3 +74,6 @@ for the publish + attestation flow.
 
 Baseline release before the exhaustive expansion. See git history for the
 prior runner + report-gate work.
+
+[1.0.0]: https://github.com/neverhuman/redline-testing/compare/v0.1.3...v1.0.0
+[0.1.3]: https://github.com/neverhuman/redline-testing/releases/tag/v0.1.3
