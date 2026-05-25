@@ -82,10 +82,17 @@ jobs:
 
           print(f"Badge updated: score={score} color={color}")
           PYEOF
-      - uses: stefanzweifel/git-auto-commit-action@8621da0631e2c0497dd06699c43044d2a1b81eb2
-        with:
-          commit_message: "chore(badge): update jankurai score badge [skip ci]"
-          file_pattern: README.md
+      - name: Commit badge update if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet README.md; then
+            echo "Badge unchanged — nothing to commit"
+          else
+            git add README.md
+            git commit -m "chore(badge): update jankurai score badge [skip ci]"
+            git push
+          fi
 
   # Beyond-postgres-reference lane: validates corpus/beyond_sqlite cases by
   # running each through psql ↔ psql self-compare. Gated to push/dispatch
