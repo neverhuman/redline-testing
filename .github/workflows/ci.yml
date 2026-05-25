@@ -46,42 +46,43 @@ jobs:
         with:
           fetch-depth: 0
       - name: Update jankurai score badge in README
+        # agent/jankurai-badge.json is the tracked source of truth for the
+        # jankurai score. When a developer updates the score (after re-running
+        # jankurai), this step syncs the README badge to match. The badge JSON
+        # format follows the shields.io endpoint schema: .message holds the
+        # human-readable score (e.g. "38/100 advisory") and .color is the
+        # shield color ("green", "yellowgreen", "orange", "red").
         run: |
-          python3 - <<'PYEOF'
-          import re, json
+          python3 - << 'PYEOF'
+import re, json
 
-          with open("agent/repo-score.json") as f:
-              data = json.load(f)
-          score = data.get("score", 0)
+with open("agent/jankurai-badge.json") as f:
+    badge = json.load(f)
 
-          if score >= 80:
-              color = "green"
-          elif score >= 60:
-              color = "yellowgreen"
-          elif score >= 40:
-              color = "orange"
-          else:
-              color = "red"
+message = badge.get("message", "unknown")
+color   = badge.get("color", "lightgrey")
 
-          encoded = f"{score}%2F100%20advisory"
-          badge_url = f"https://img.shields.io/badge/jankurai-{encoded}-{color}"
-          badge_md = f"[![Jankurai score: {score}/100 advisory]({badge_url})](agent/repo-score.json)"
+# URL-encode the message for the static shields.io badge URL
+encoded = message.replace("/", "%2F").replace(" ", "%20")
+badge_url = f"https://img.shields.io/badge/jankurai-{encoded}-{color}"
+badge_md  = f"[![Jankurai score: {message}]({badge_url})](agent/repo-score.json)"
 
-          with open("README.md") as f:
-              content = f.read()
+with open("README.md") as f:
+    content = f.read()
 
-          new_content = re.sub(
-              r"<!-- jankurai-score-badge:begin -->.*?<!-- jankurai-score-badge:end -->",
-              f"<!-- jankurai-score-badge:begin -->\n{badge_md}\n<!-- jankurai-score-badge:end -->",
-              content,
-              flags=re.DOTALL,
-          )
+new_content = re.sub(
+    r"<!-- jankurai-score-badge:begin -->.*?<!-- jankurai-score-badge:end -->",
+    f"<!-- jankurai-score-badge:begin -->\n{badge_md}\n<!-- jankurai-score-badge:end -->",
+    content,
+    flags=re.DOTALL,
+)
 
-          with open("README.md", "w") as f:
-              f.write(new_content)
+with open("README.md", "w") as f:
+    f.write(new_content)
 
-          print(f"Badge updated: score={score} color={color}")
-          PYEOF
+changed = new_content != content
+print(f"Badge: {message} ({color}) — README {'updated' if changed else 'unchanged'}")
+PYEOF
       - name: Commit badge update if changed
         run: |
           git config user.name "github-actions[bot]"
