@@ -411,10 +411,7 @@ mod tests {
         // RedlineDB side: `["a","b","c"]` collapses to `[a,b,c]` via the
         // new unquote normalizer.
         let pg = apply("{a,b,c}\n", Normalizer::PgArrayBraceToBracket);
-        let rdb = apply(
-            "[\"a\",\"b\",\"c\"]\n",
-            Normalizer::JsonStringArrayUnquote,
-        );
+        let rdb = apply("[\"a\",\"b\",\"c\"]\n", Normalizer::JsonStringArrayUnquote);
         assert_eq!(pg, rdb);
     }
 }

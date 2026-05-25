@@ -51,6 +51,7 @@ pub enum Capability {
     EscapeSymbolOption,
     Fts5,
     Rtree,
+    Dbstat,
     Jsonb,
     Math1,
     GenerateSeries,
@@ -69,6 +70,7 @@ impl Capability {
             Self::EscapeSymbolOption => "-escape symbol",
             Self::Fts5 => "fts5 virtual table",
             Self::Rtree => "rtree virtual table",
+            Self::Dbstat => "dbstat virtual table",
             Self::Jsonb => "jsonb() (3.45+)",
             Self::Math1 => "math1 functions (acos/asin/sqrt/etc.)",
             Self::GenerateSeries => "generate_series virtual table",
@@ -87,6 +89,7 @@ impl Capability {
             "escape_symbol_option" => Some(Self::EscapeSymbolOption),
             "fts5" => Some(Self::Fts5),
             "rtree" => Some(Self::Rtree),
+            "dbstat" => Some(Self::Dbstat),
             "jsonb" => Some(Self::Jsonb),
             "math1" => Some(Self::Math1),
             "generate_series" => Some(Self::GenerateSeries),
@@ -108,6 +111,7 @@ pub struct ShellCapabilities {
     pub escape_symbol_option: bool,
     pub fts5: bool,
     pub rtree: bool,
+    pub dbstat: bool,
     pub jsonb: bool,
     pub math1: bool,
     pub generate_series: bool,
@@ -126,6 +130,7 @@ impl ShellCapabilities {
             Capability::EscapeSymbolOption => self.escape_symbol_option,
             Capability::Fts5 => self.fts5,
             Capability::Rtree => self.rtree,
+            Capability::Dbstat => self.dbstat,
             Capability::Jsonb => self.jsonb,
             Capability::Math1 => self.math1,
             Capability::GenerateSeries => self.generate_series,
@@ -149,29 +154,40 @@ pub struct CasePartition {
 
 pub fn partition_cases(
     cases: Vec<Case>,
-    capabilities: Option<&ShellCapabilities>,
+    reference_caps: Option<&ShellCapabilities>,
+    target_caps: Option<&ShellCapabilities>,
 ) -> CasePartition {
     let mut partition = CasePartition::default();
     for case in cases {
         let required = required_capabilities(&case);
-        let Some(capabilities) = capabilities else {
+        if required.is_empty() {
             partition.runnable.push(case);
             continue;
-        };
-
-        if let Some(capability) = required
-            .iter()
-            .copied()
-            .find(|capability| !capabilities.supports(*capability))
-        {
-            let reason = format!(
-                "{} lacks {}",
-                shell_version_prefix(capabilities),
-                capability.description()
-            );
-            partition.skipped.push(SkippedCase { case, reason });
-        } else {
-            partition.runnable.push(case);
+        }
+        let skip_reason = required.iter().copied().find_map(|capability| {
+            if let Some(caps) = reference_caps
+                && !caps.supports(capability)
+            {
+                return Some(format!(
+                    "{} lacks {}",
+                    shell_version_prefix(caps),
+                    capability.description()
+                ));
+            }
+            if let Some(caps) = target_caps
+                && !caps.supports(capability)
+            {
+                return Some(format!(
+                    "{} lacks {}",
+                    shell_version_prefix(caps),
+                    capability.description()
+                ));
+            }
+            None
+        });
+        match skip_reason {
+            Some(reason) => partition.skipped.push(SkippedCase { case, reason }),
+            None => partition.runnable.push(case),
         }
     }
     partition
@@ -188,6 +204,9 @@ pub fn partition_cases(
 pub fn required_capabilities(case: &Case) -> Vec<Capability> {
     let mut caps = match case.id {
         92 => vec![Capability::PercentileFunctions],
+        93 | 94 => vec![Capability::Fts5],
+        95 => vec![Capability::Rtree],
+        96 => vec![Capability::Dbstat],
         134 => vec![Capability::DotCrlf],
         154 => vec![Capability::DotDbInfo],
         155 => vec![Capability::DotDbTotxt],
@@ -233,6 +252,12 @@ pub fn probe_sqlite_shell_capabilities(bin: &Path) -> Result<ShellCapabilities> 
             "CREATE VIRTUAL TABLE _probe_rtree USING rtree(id, x0, x1, y0, y1);\n",
             &[],
         )?,
+        dbstat: run_sql_script(
+            bin,
+            memory_db,
+            "CREATE TABLE _probe_t(x);\nINSERT INTO _probe_t VALUES(1);\nCREATE VIRTUAL TABLE temp._probe_stat USING dbstat;\nSELECT count(*) FROM _probe_stat;\n",
+            &[],
+        )?,
         jsonb: run_sql_script(bin, memory_db, "SELECT length(jsonb('1'));\n", &[])?,
         math1: run_sql_script(
             bin,
@@ -253,6 +278,46 @@ pub fn probe_sqlite_shell_capabilities(bin: &Path) -> Result<ShellCapabilities> 
             "SELECT length(jsonb_array_insert('[]', '$[0]', 1));\n",
             &[],
         )?,
+    })
+}
+
+/// Probe an arbitrary sqlite-shell-compatible binary (including the
+/// `redlinedb-cli` target binary) for the SQL/CLI capabilities the
+/// pinned-manifest cases gate on. We only probe the subset that
+/// pinned-manifest cases actually require — bench-only or CLI-only
+/// capabilities that no required-capability case names are skipped to
+/// keep target startup cost down.
+pub fn probe_target_capabilities(bin: &Path) -> Result<ShellCapabilities> {
+    let version = probe_version(bin)?;
+    let memory_db = Path::new(":memory:");
+    let probe = |script: &str| run_sql_script(bin, memory_db, script, &[]);
+    Ok(ShellCapabilities {
+        version,
+        // CLI-only / non-SQL capabilities — gate via shell help when
+        // available, default to absent for engines that don't ship the
+        // sqlite3 CLI help surface.
+        percentile_functions: probe(
+            ".mode list\n.headers off\nCREATE TABLE t(x INTEGER); INSERT INTO t VALUES (1), (2), (3);\nSELECT median(x), percentile_cont(x,0.5) FROM t;\n",
+        )
+        .unwrap_or(false),
+        dot_crlf: shell_help_contains(bin, ".crlf").unwrap_or(false),
+        dot_dbinfo: shell_help_contains(bin, ".dbinfo").unwrap_or(false),
+        dot_dbtotxt: shell_help_contains(bin, ".dbtotxt").unwrap_or(false),
+        dot_recover: shell_help_contains(bin, ".recover").unwrap_or(false),
+        escape_symbol_option: escape_symbol_option_supported(bin).unwrap_or(false),
+        fts5: probe("CREATE VIRTUAL TABLE _probe_fts USING fts5(x);\n").unwrap_or(false),
+        rtree: probe("CREATE VIRTUAL TABLE _probe_rtree USING rtree(id, x0, x1, y0, y1);\n")
+            .unwrap_or(false),
+        dbstat: probe(
+            "CREATE TABLE _probe_t(x);\nINSERT INTO _probe_t VALUES(1);\nCREATE VIRTUAL TABLE temp._probe_stat USING dbstat;\nSELECT count(*) FROM _probe_stat;\n",
+        )
+        .unwrap_or(false),
+        jsonb: probe("SELECT length(jsonb('1'));\n").unwrap_or(false),
+        math1: probe("SELECT round(acos(1.0),3), round(sqrt(4.0),3);\n").unwrap_or(false),
+        generate_series: probe("SELECT count(*) FROM generate_series(1,3);\n").unwrap_or(false),
+        json_pretty: probe("SELECT json_pretty('{\"a\":1}');\n").unwrap_or(false),
+        jsonb_array_insert: probe("SELECT length(jsonb_array_insert('[]', '$[0]', 1));\n")
+            .unwrap_or(false),
     })
 }
 
@@ -352,6 +417,14 @@ impl EngineSpec {
         } else {
             Ok(None)
         }
+    }
+
+    /// Probe the engine binary for the SQL/CLI capabilities required by
+    /// pinned-manifest cases. Works for any sqlite-shell-compatible CLI
+    /// (sqlite3 or redlinedb), so we can skip target-optional cases the
+    /// target lacks without failing the parity gate.
+    pub fn target_capabilities(&self) -> Result<ShellCapabilities> {
+        probe_target_capabilities(&self.bin)
     }
 
     pub fn binary_identity(&self) -> Result<BinaryIdentity> {

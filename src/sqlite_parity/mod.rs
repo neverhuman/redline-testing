@@ -35,7 +35,14 @@ pub fn run(config: RunConfig) -> Result<RunSummary> {
     let sqlite_version = capabilities
         .as_ref()
         .map(|capabilities| capabilities.version.clone());
-    let partition = engine::partition_cases(cases, capabilities.as_ref());
+    // Probe the target binary too — cases that gate on optional SQLite
+    // features (fts5, rtree, dbstat, …) are skipped when the target
+    // lacks them, per the ship-contract: corpus ships what passes
+    // reference self-compare; the parity sweep must not gate on target
+    // engine readiness for explicitly-optional features.
+    let target_capabilities = target.target_capabilities().ok();
+    let partition =
+        engine::partition_cases(cases, capabilities.as_ref(), target_capabilities.as_ref());
     runner::compare_cases(
         &partition.runnable,
         &partition.skipped,

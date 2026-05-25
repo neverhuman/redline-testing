@@ -42,7 +42,16 @@ pub fn all_cases() -> Result<Vec<Case>> {
 }
 
 pub fn selected_official_cases() -> Result<Vec<Case>> {
-    let cases = all_cases()?
+    let pinned_only = matches!(
+        std::env::var("REDLINE_TESTING_PINNED_ONLY").ok().as_deref(),
+        Some("1") | Some("true") | Some("TRUE")
+    );
+    let cases = if pinned_only {
+        pinned_cases()?
+    } else {
+        all_cases()?
+    };
+    let cases = cases
         .into_iter()
         .filter(|case| case.status == "active" || case.status == "catalog_only")
         .collect::<Vec<_>>();
