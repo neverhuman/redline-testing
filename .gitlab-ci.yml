@@ -32,7 +32,6 @@ pr_ci:
   before_script:
     - apt-get update
     - apt-get install -y --no-install-recommends ca-certificates curl git jq sqlite3
-    - cargo install just --locked
   script:
     - bash scripts/ci-local.sh pr-ci
 
@@ -98,7 +97,6 @@ release_package:
   before_script:
     - apt-get update
     - apt-get install -y --no-install-recommends ca-certificates curl git jq sqlite3
-    - cargo install just --locked
   script:
     - bash scripts/ci-local.sh pr-ci
     - bash scripts/ci-local.sh release

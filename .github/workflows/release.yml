@@ -27,8 +27,6 @@ jobs:
         with:
           toolchain: 1.95.0
           components: rustfmt
-      - name: Install just
-        run: cargo install just --locked
       - name: Verify release tag
         run: |
           test "${GITHUB_REF_TYPE:-}" = "tag"
