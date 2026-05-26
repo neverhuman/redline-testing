@@ -1,0 +1,107 @@
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+    - when: never
+
+stages:
+  - validate
+  - package
+
+default:
+  image: rust:1.95-bookworm
+  variables:
+    CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+    CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    DEBIAN_FRONTEND: "noninteractive"
+    RUSTUP_HOME: "$CI_PROJECT_DIR/.rustup"
+  cache:
+    key: "cargo-${CI_JOB_IMAGE}"
+    paths:
+      - .cargo/git/
+      - .cargo/registry/
+      - target/
+
+pr_ci:
+  stage: validate
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends ca-certificates curl git jq sqlite3
+    - cargo install just --locked
+  script:
+    - bash scripts/ci-local.sh pr-ci
+
+beyond_postgres:
+  stage: validate
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+  services:
+    - name: postgres:16
+      alias: postgres
+      command:
+        - postgres
+        - -c
+        - fsync=off
+  variables:
+    POSTGRES_DB: postgres
+    POSTGRES_HOST_AUTH_METHOD: trust
+    POSTGRES_PASSWORD: postgres
+    REDLINE_TESTING_POSTGRES_URL: postgresql://postgres@postgres:5432/postgres
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends ca-certificates curl git jq postgresql-client sqlite3
+  script:
+    - cargo test --locked --test beyond_sqlite_smoke
+    - cargo build --release --locked
+    - mkdir -p out
+    - ./target/release/redline-testing run --suite beyond_sqlite --target-bin sqlite3 --output out/beyond.jsonl --memory-samples
+    - head -50 out/beyond.jsonl
+  artifacts:
+    when: always
+    paths:
+      - out/beyond.jsonl
+
+security:
+  stage: validate
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
+      allow_failure: true
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends ca-certificates curl git jq sqlite3
+  script:
+    - bash scripts/ci-local.sh security
+
+audit:
+  stage: validate
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
+      allow_failure: true
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends ca-certificates curl git jq sqlite3
+  script:
+    - bash scripts/ci-local.sh audit
+
+release_package:
+  stage: package
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends ca-certificates curl git jq sqlite3
+    - cargo install just --locked
+  script:
+    - bash scripts/ci-local.sh pr-ci
+    - bash scripts/ci-local.sh release
+  artifacts:
+    when: always
+    paths:
+      - dist/

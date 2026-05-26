@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Local CI dispatcher for the same proof surface used by GitHub Actions.
+# Local CI dispatcher for the same proof surface used by GitLab CI and the
+# GitHub CI mirror.
 
 set -euo pipefail
 
@@ -16,7 +17,7 @@ usage() {
     cat >&2 <<'USAGE'
 usage: scripts/ci-local.sh {pr-ci|security|audit|release|doctor}
 
-  pr-ci    run the exact local mirror of .github/workflows/ci.yml
+  pr-ci    run the exact local mirror of the CI validation surface
   security run the repository security lane
   audit    run the repository audit lane
   release  run the release packaging lane

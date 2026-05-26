@@ -1,6 +1,8 @@
 # redline-testing
 
-[![CI](https://github.com/neverhuman/redline-testing/actions/workflows/ci.yml/badge.svg)](https://github.com/neverhuman/redline-testing/actions/workflows/ci.yml)
+Primary CI runs in GitLab via [.gitlab-ci.yml](.gitlab-ci.yml).
+GitHub also mirrors the CI lanes via [.github/workflows/ci.yml](.github/workflows/ci.yml).
+Public release artifacts are published on GitHub via [.github/workflows/release.yml](.github/workflows/release.yml).
 <!-- jankurai-score-badge:begin -->
 [![Jankurai score: 38/100 advisory](https://img.shields.io/badge/jankurai-38%2F100%20advisory-red)](agent/repo-score.json)
 <!-- jankurai-score-badge:end -->
@@ -25,23 +27,23 @@ Download the pre-built binary from [GitHub Releases](https://github.com/neverhum
 
 ```bash
 curl -fsSL \
-  https://github.com/neverhuman/redline-testing/releases/latest/download/redline-testing-1.0.0-linux-x86_64.tar.gz \
+  https://github.com/neverhuman/redline-testing/releases/latest/download/redline-testing-1.0.1-linux-x86_64.tar.gz \
   | tar -xz
-./redline-testing-1.0.0-linux-x86_64/bin/redline-testing --version
+./redline-testing-1.0.1-linux-x86_64/bin/redline-testing --version
 ```
 
-Each release ships a `.sha256` sidecar and a Sigstore/SLSA build-provenance attestation.
-Verify before you run:
+Each release ships a `.sha256` sidecar and a Sigstore/SLSA build-provenance
+attestation. Verify the tarball hash before you run:
 
 ```bash
-gh attestation verify redline-testing-1.0.0-linux-x86_64.tar.gz \
+sha256sum -c redline-testing-1.0.1-linux-x86_64.tar.gz.sha256
+```
+
+You can also verify the attestation with GitHub CLI:
+
+```bash
+gh attestation verify redline-testing-1.0.1-linux-x86_64.tar.gz \
   --repo neverhuman/redline-testing
-```
-
-Or verify the tarball hash manually:
-
-```bash
-sha256sum -c redline-testing-1.0.0-linux-x86_64.tar.gz.sha256
 ```
 
 ---
@@ -180,9 +182,10 @@ schemas/release-manifest.schema.json
 templates/README.sqlite-parity.md
 ```
 
-Tagged GitHub releases are built by `.github/workflows/release.yml`,
-publish the tarball + `.sha256`, and request GitHub artifact attestations
-via `actions/attest-build-provenance` (SLSA / Sigstore).
+Tagged GitHub releases are built by [.github/workflows/release.yml](.github/workflows/release.yml),
+which reruns `pr-ci`, packages the tarball via `just release-local`, attests
+the tarball + `.sha256` + `release-manifest.json`, and publishes the assets
+with `gh release create --verify-tag`.
 
 ---
 

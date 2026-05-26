@@ -45,62 +45,18 @@ jobs:
             dist/redline-testing-*-linux-x86_64.tar.gz
             dist/redline-testing-*-linux-x86_64.tar.gz.sha256
             dist/release-manifest.json
-      - name: Generate release notes
-        run: |
-          tag="${GITHUB_REF_NAME:-manual}"
-          version="${tag#v}"
-          # Extract the current release's CHANGELOG section
-          # (everything between the [version] heading and the next ## heading)
-          awk "/^## \[${version}\]/{found=1; next} found && /^## /{exit} found{print}" \
-            CHANGELOG.md > /tmp/changelog-section.md
-          # Write release notes without heredoc to avoid YAML-indentation bleed
-          {
-            printf '## redline-testing %s\n\n' "$tag"
-            printf 'Conformance, benchmark, and SQLite-parity test harness for **any SQLite-compatible database**.\n'
-            printf 'Point `--target-bin` at your binary; the runner does the rest.\n\n'
-            printf '### Install\n\n'
-            printf '```bash\n'
-            printf 'curl -fsSL \\\n'
-            printf '  https://github.com/%s/releases/download/%s/redline-testing-%s-linux-x86_64.tar.gz \\\n' \
-              "$GITHUB_REPOSITORY" "$tag" "$version"
-            printf '  | tar -xz\n'
-            printf './redline-testing-%s-linux-x86_64/bin/redline-testing --version\n' "$version"
-            printf '```\n\n'
-            printf '### Verify attestation (Sigstore/SLSA)\n\n'
-            printf '```bash\n'
-            printf 'gh attestation verify redline-testing-%s-linux-x86_64.tar.gz \\\n' "$version"
-            printf '  --repo %s\n' "$GITHUB_REPOSITORY"
-            printf '```\n\n'
-            printf 'Or verify the SHA-256 sidecar:\n\n'
-            printf '```bash\n'
-            printf 'sha256sum -c redline-testing-%s-linux-x86_64.tar.gz.sha256\n' "$version"
-            printf '```\n\n'
-            printf '### Quick start\n\n'
-            printf '```bash\n'
-            printf 'redline-testing run \\\n'
-            printf '  --suite sqlite_parity \\\n'
-            printf '  --target-bin /path/to/your-db \\\n'
-            printf '  --sqlite-bin /usr/bin/sqlite3 \\\n'
-            printf '  --output results.jsonl\n'
-            printf '```\n\n'
-            printf '### What'\''s in this release\n\n'
-            cat /tmp/changelog-section.md
-            printf '\n---\nFull changelog: [CHANGELOG.md](https://github.com/%s/blob/%s/CHANGELOG.md)\n' \
-              "$GITHUB_REPOSITORY" "$tag"
-          } > /tmp/release-notes.md
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${GITHUB_REF_NAME:-manual}"
-          version="${tag#v}"
           # --verify-tag binds the release to a tag that already exists in
           # the repo, preventing accidental release creation against a
           # mutable / non-tag ref.
           gh release create "$tag" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "redline-testing ${tag}" \
-            --notes-file /tmp/release-notes.md \
+            --title "$tag" \
+            --notes "redline-testing ${tag}" \
             --verify-tag \
             dist/redline-testing-*-linux-x86_64.tar.gz \
             dist/redline-testing-*-linux-x86_64.tar.gz.sha256 \

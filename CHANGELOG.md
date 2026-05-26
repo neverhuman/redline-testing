@@ -7,6 +7,15 @@ for the publish + attestation flow.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-05-26
+
+### Fixed
+
+- Restored the GitHub CI mirror and GitHub release workflow alongside the
+  GitLab validation pipeline.
+- Re-aligned the release docs, ownership maps, and CI guardrails so the
+  public release host and local proof surface are explicit again.
+
 ## [1.0.0] - 2026-05-25
 
 ### Added — exhaustive corpus expansion
@@ -76,4 +85,5 @@ Baseline release before the exhaustive expansion. See git history for the
 prior runner + report-gate work.
 
 [1.0.0]: https://github.com/neverhuman/redline-testing/compare/v0.1.3...v1.0.0
+[1.0.1]: https://github.com/neverhuman/redline-testing/compare/v1.0.0...v1.0.1
 [0.1.3]: https://github.com/neverhuman/redline-testing/releases/tag/v0.1.3
