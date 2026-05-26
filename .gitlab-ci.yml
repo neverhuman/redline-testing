@@ -11,17 +11,18 @@ stages:
 
 default:
   image: rust:1.95-bookworm
-  variables:
-    CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
-    CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-    DEBIAN_FRONTEND: "noninteractive"
-    RUSTUP_HOME: "$CI_PROJECT_DIR/.rustup"
   cache:
     key: "cargo-${CI_JOB_IMAGE}"
     paths:
       - .cargo/git/
       - .cargo/registry/
       - target/
+
+variables:
+  CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  DEBIAN_FRONTEND: "noninteractive"
+  RUSTUP_HOME: "$CI_PROJECT_DIR/.rustup"
 
 pr_ci:
   stage: validate
