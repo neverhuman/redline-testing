@@ -8,4 +8,4 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 cd "$repo_root"
 
-ci_run just release-local
+ci_run scripts/release-package.sh

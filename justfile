@@ -12,7 +12,7 @@ check:
 test:
     cargo test --locked
 
-# Full verification mirror of GitHub Actions ci.yml.
+# Full verification mirror of the primary CI validation pipeline.
 verify: pr-ci
 
 pr-ci:

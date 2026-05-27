@@ -299,13 +299,9 @@ fn normalize_json_string_array_unquote(text: &str) -> String {
                     for v in arr {
                         match v {
                             serde_json::Value::String(s) => parts.push(s),
-                            other => {
+                            _ => {
                                 // Mixed-type — leave the whole cell untouched.
                                 return cell.to_owned();
-                                #[allow(unreachable_code)]
-                                {
-                                    let _ = other;
-                                }
                             }
                         }
                     }

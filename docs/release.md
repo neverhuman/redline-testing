@@ -1,7 +1,8 @@
 # Release process
 
-`redline-testing` ships as a single signed tarball that RedlineDB CI consumes
-as a pinned artifact. The release workflow is:
+`redline-testing` ships as a single tarball that RedlineDB CI consumes as a
+pinned artifact. GitLab remains the pre-merge validation surface; GitHub
+Releases is the public download host. The release workflow is:
 
 1. **Version source.** `Cargo.toml` `[package].version` is the canonical
    version. `CHANGELOG.md` is the human-facing log of what changed.
@@ -21,15 +22,16 @@ as a pinned artifact. The release workflow is:
    in the tarball but missing from `artifact_hashes` (or vice versa), this
    test fails loudly. It runs as part of `just pr-ci`.
 4. **Tag the release.** `git tag -s v<version>` (signed) → `git push origin
-   v<version>`. The `release` workflow at `.github/workflows/release.yml`
-   triggers on tag push.
-5. **CI build + attestation.** The release workflow re-runs `pr-ci`, re-builds
-   the tarball via `just release-local`, requests
-   [`actions/attest-build-provenance`](https://github.com/actions/attest-build-provenance)
-   on the tarball + `.sha256` + `release-manifest.json`, then runs
-   `gh release create v<version> --verify-tag ...`. The `--verify-tag` flag
-   binds the release to the actually-pushed tag so the artifact cannot be
-   accidentally attached to a mutable ref.
+   v<version>`. The GitHub release workflow in
+   `.github/workflows/release.yml` triggers on tag push and can also be
+   started manually against an existing tag ref.
+5. **CI build + attestation.** GitLab continues to run `pr-ci` on merge
+   requests and the default branch, and its tag-only packaging job keeps the
+   tarball path exercised before publish. The GitHub release workflow re-runs
+   `pr-ci`, rebuilds the tarball via `just release-local`, requests
+   `actions/attest-build-provenance` for the tarball + `.sha256` +
+   `release-manifest.json`, and publishes the assets with `gh release create
+   --verify-tag`.
 
 ## Verifying a release locally
 

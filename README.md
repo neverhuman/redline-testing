@@ -1,6 +1,8 @@
 # redline-testing
 
-[![CI](https://github.com/neverhuman/redline-testing/actions/workflows/ci.yml/badge.svg)](https://github.com/neverhuman/redline-testing/actions/workflows/ci.yml)
+Primary CI runs in GitLab via [.gitlab-ci.yml](.gitlab-ci.yml).
+GitHub also mirrors the CI lanes via [.github/workflows/ci.yml](.github/workflows/ci.yml).
+Public release artifacts are published on GitHub via [.github/workflows/release.yml](.github/workflows/release.yml).
 <!-- jankurai-score-badge:begin -->
 [![Jankurai score: 38/100 advisory](https://img.shields.io/badge/jankurai-38%2F100%20advisory-red)](agent/repo-score.json)
 <!-- jankurai-score-badge:end -->
@@ -14,8 +16,9 @@ Suites:
 |---|---|---|---|
 | `sqlite_parity` | SQL + CLI conformance vs SQLite reference | 2,445 | No |
 | `memory` | Same corpus with Linux `/proc` RSS sampling | 2,445 | No |
+| `rql_phase1` | Redline Query Language phase 1 conformance | 1,385 | No |
 | `beyond_sqlite` | PostgreSQL-class features, oracle-validated | 265 | Optional |
-| `all` | All suites + `official-evidence.json` hash bundle | 2,710+ | Optional |
+| `all` | All suites + `official-evidence.json` hash bundle | 4,095+ | Optional |
 
 ---
 
@@ -25,23 +28,23 @@ Download the pre-built binary from [GitHub Releases](https://github.com/neverhum
 
 ```bash
 curl -fsSL \
-  https://github.com/neverhuman/redline-testing/releases/latest/download/redline-testing-1.0.0-linux-x86_64.tar.gz \
+  https://github.com/neverhuman/redline-testing/releases/latest/download/redline-testing-1.0.1-linux-x86_64.tar.gz \
   | tar -xz
-./redline-testing-1.0.0-linux-x86_64/bin/redline-testing --version
+./redline-testing-1.0.1-linux-x86_64/bin/redline-testing --version
 ```
 
-Each release ships a `.sha256` sidecar and a Sigstore/SLSA build-provenance attestation.
-Verify before you run:
+Each release ships a `.sha256` sidecar and a Sigstore/SLSA build-provenance
+attestation. Verify the tarball hash before you run:
 
 ```bash
-gh attestation verify redline-testing-1.0.0-linux-x86_64.tar.gz \
+sha256sum -c redline-testing-1.0.1-linux-x86_64.tar.gz.sha256
+```
+
+You can also verify the attestation with GitHub CLI:
+
+```bash
+gh attestation verify redline-testing-1.0.1-linux-x86_64.tar.gz \
   --repo neverhuman/redline-testing
-```
-
-Or verify the tarball hash manually:
-
-```bash
-sha256sum -c redline-testing-1.0.0-linux-x86_64.tar.gz.sha256
 ```
 
 ---
@@ -68,7 +71,7 @@ It writes JSONL records on stdout/file and exits non-zero if any case fails.
 
 ```bash
 redline-testing run \
-  --suite sqlite_parity \     # sqlite_parity | memory | beyond_sqlite | all
+  --suite sqlite_parity \     # sqlite_parity | memory | rql_phase1 | beyond_sqlite | all
   --target-bin /path/to/db \
   --sqlite-bin /path/to/sqlite3 \
   --workers auto \            # accepted; execution is serial in this release
@@ -127,6 +130,13 @@ Same parity corpus with Linux `/proc` RSS sampling enabled. Writes:
 `memory-manifest.json`, `memory-provenance.json`.
 Falls back gracefully if `/proc` is unavailable (`memory_status: unavailable`).
 
+### `rql_phase1`
+
+Redline Query Language phase 1 corpus, exercised against the SQLite reference
+CLI and the target binary. Writes:
+`rql_phase1.raw.jsonl`, `rql-phase1-summary.json`, `rql-phase1-ranked.csv`,
+`rql-phase1-manifest.json`, `rql-phase1-provenance.json`.
+
 ### `beyond_sqlite`
 
 265 oracle-validated cases covering 12 PostgreSQL feature areas
@@ -180,9 +190,10 @@ schemas/release-manifest.schema.json
 templates/README.sqlite-parity.md
 ```
 
-Tagged GitHub releases are built by `.github/workflows/release.yml`,
-publish the tarball + `.sha256`, and request GitHub artifact attestations
-via `actions/attest-build-provenance` (SLSA / Sigstore).
+Tagged GitHub releases are built by [.github/workflows/release.yml](.github/workflows/release.yml),
+which reruns `pr-ci`, packages the tarball via `just release-local`, attests
+the tarball + `.sha256` + `release-manifest.json`, and publishes the assets
+with `gh release create --verify-tag`.
 
 ---
 

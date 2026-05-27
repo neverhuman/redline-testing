@@ -154,6 +154,8 @@ enum Suite {
     SqliteParity,
     #[value(name = "memory")]
     Memory,
+    #[value(name = "rql_phase1", alias = "rql-phase1")]
+    RqlPhase1,
     #[value(name = "beyond_sqlite", alias = "beyond-sqlite")]
     BeyondSqlite,
 }
@@ -196,7 +198,7 @@ fn run_suite(args: RunArgs) -> Result<()> {
 
     match args.suite {
         Suite::All => run_all_suites(&args, workers, tmp_root, sqlite_bin),
-        Suite::SqliteParity | Suite::Memory => {
+        Suite::SqliteParity | Suite::Memory | Suite::RqlPhase1 => {
             prepare_output(&args.output)?;
             let started = Instant::now();
             let summary = run_sqlite_like_suite(
@@ -249,6 +251,7 @@ fn run_all_suites(
     fs::create_dir_all(output_dir).with_context(|| format!("create {}", output_dir.display()))?;
     let sqlite_output = output_dir.join("sqlite_parity.raw.jsonl");
     let memory_output = output_dir.join("memory.raw.jsonl");
+    let rql_output = output_dir.join("rql_phase1.raw.jsonl");
     let beyond_output = output_dir.join("beyond_sqlite.raw.jsonl");
 
     prepare_output(&sqlite_output)?;
@@ -269,11 +272,20 @@ fn run_all_suites(
         tmp_root.clone(),
         sqlite_bin.clone(),
     )?;
+    prepare_output(&rql_output)?;
+    let rql_summary = run_sqlite_like_suite(
+        args,
+        Suite::RqlPhase1,
+        rql_output.clone(),
+        workers,
+        tmp_root.clone(),
+        sqlite_bin.clone(),
+    )?;
     prepare_output(&beyond_output)?;
     let beyond_summary = run_beyond_sqlite_suite(args, beyond_output.clone())?;
 
     let mut combined = String::new();
-    for path in [&sqlite_output, &memory_output, &beyond_output] {
+    for path in [&sqlite_output, &memory_output, &rql_output, &beyond_output] {
         combined.push_str(
             &fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?,
         );
@@ -290,6 +302,7 @@ fn run_all_suites(
                 sqlite_summary.clone(),
             ),
             ("memory", memory_output.as_path(), memory_summary.clone()),
+            ("rql_phase1", rql_output.as_path(), rql_summary.clone()),
             (
                 "beyond_sqlite",
                 beyond_output.as_path(),
@@ -330,6 +343,15 @@ fn run_all_suites(
                 &memory_summary,
             ),
             OfficialSuiteEvidence::new(
+                "rql_phase1",
+                rql_output,
+                evidence::suite_artifact_path(output_dir, "rql_phase1", "summary.json"),
+                evidence::suite_artifact_path(output_dir, "rql_phase1", "ranked.csv"),
+                evidence::suite_artifact_path(output_dir, "rql_phase1", "manifest.json"),
+                evidence::suite_artifact_path(output_dir, "rql_phase1", "provenance.json"),
+                &rql_summary,
+            ),
+            OfficialSuiteEvidence::new(
                 "beyond_sqlite",
                 beyond_output,
                 evidence::suite_artifact_path(output_dir, "beyond_sqlite", "summary.json"),
@@ -352,17 +374,31 @@ fn run_sqlite_like_suite(
 ) -> Result<sqlite_parity::RunSummary> {
     let memory_samples = args.memory_samples || matches!(suite, Suite::Memory);
     let started_unix_ms = evidence::now_unix_ms();
-    let summary = sqlite_parity::run(sqlite_parity::RunConfig {
-        reference_bin: sqlite_bin.clone(),
-        target_bin: args.target_bin.clone(),
-        output: output.clone(),
-        tmp_root: tmp_root.clone(),
-        workers,
-        repetitions: args.repetitions,
-        warmup: args.warmup,
-        progress: progress_enabled(args.progress),
-        memory_samples,
-    })?;
+    let summary = if matches!(suite, Suite::RqlPhase1) {
+        sqlite_parity::run_rql_phase1(sqlite_parity::RqlPhase1RunConfig {
+            reference_bin: sqlite_bin.clone(),
+            target_bin: args.target_bin.clone(),
+            output: output.clone(),
+            tmp_root: tmp_root.clone(),
+            workers,
+            repetitions: args.repetitions,
+            warmup: args.warmup,
+            progress: progress_enabled(args.progress),
+            memory_samples,
+        })?
+    } else {
+        sqlite_parity::run(sqlite_parity::RunConfig {
+            reference_bin: sqlite_bin.clone(),
+            target_bin: args.target_bin.clone(),
+            output: output.clone(),
+            tmp_root: tmp_root.clone(),
+            workers,
+            repetitions: args.repetitions,
+            warmup: args.warmup,
+            progress: progress_enabled(args.progress),
+            memory_samples,
+        })?
+    };
     evidence::write_sqlite_parity_evidence(EvidenceConfig {
         suite: suite.as_str().to_owned(),
         output,
@@ -453,9 +489,9 @@ fn list(args: ListArgs) -> Result<()> {
     if matches!(args.suite, Suite::BeyondSqlite) {
         return list_beyond_sqlite(args.format);
     }
-    let cases = sqlite_parity::all_cases()?;
     let selected = match args.suite {
-        Suite::All | Suite::SqliteParity | Suite::Memory => cases,
+        Suite::All | Suite::SqliteParity | Suite::Memory => sqlite_parity::all_cases()?,
+        Suite::RqlPhase1 => sqlite_parity::rql_phase1_cases()?,
         Suite::BeyondSqlite => unreachable!("handled above"),
     };
     match args.format {
@@ -556,6 +592,7 @@ impl Suite {
             Self::All => "all",
             Self::SqliteParity => "sqlite_parity",
             Self::Memory => "memory",
+            Self::RqlPhase1 => "rql_phase1",
             Self::BeyondSqlite => "beyond_sqlite",
         }
     }
