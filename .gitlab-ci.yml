@@ -36,6 +36,12 @@ pr_ci:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   before_script:
+    # Evict runner-injected sccache at the shell level so cargo invokes rustc
+    # directly. The runner re-applies RUSTC_WRAPPER=sccache after yaml-variable
+    # resolution, so unsetting in before_script (same shell as script:) is the
+    # only reliable intercept point.
+    - unset RUSTC_WRAPPER
+    - pkill sccache 2>/dev/null || true
     - apt-get update
     - apt-get install -y --no-install-recommends ca-certificates curl git jq sqlite3
   script:
@@ -102,6 +108,8 @@ release_package:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v/'
   before_script:
+    - unset RUSTC_WRAPPER
+    - pkill sccache 2>/dev/null || true
     - apt-get update
     - apt-get install -y --no-install-recommends ca-certificates curl git jq sqlite3
   script:
