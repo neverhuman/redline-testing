@@ -23,6 +23,11 @@ variables:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   DEBIAN_FRONTEND: "noninteractive"
   RUSTUP_HOME: "$CI_PROJECT_DIR/.rustup"
+  # Override runner-injected sccache wrapper — the sccache remote-cache stalls
+  # indefinitely on this runner when compiling the main crate. Disable it so
+  # rustc is invoked directly and the build completes predictably.
+  RUSTC_WRAPPER: ""
+  SCCACHE_DISABLED: "1"
 
 pr_ci:
   stage: validate
