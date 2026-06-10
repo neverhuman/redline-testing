@@ -6,12 +6,18 @@ Mission: keep the external RedlineDB conformance runner deterministic,
 release-packaged, and compatible with RedlineDB's pinned artifact consumer.
 
 Start here:
-- `.jankurai/owner-map.json`
-- `.jankurai/test-map.json`
-- `.jankurai/proof-lanes.toml`
-- `.jankurai/generated-zones.toml`
-- `.jankurai/audit-policy.toml`
-- `.jankurai/unsafe-ledger.toml`
+- `docs/architecture.md` — layers, data-access boundary, output contract
+- `docs/boundaries.md` — adapter seam, generated zones, ownership
+- `docs/testing.md` — proof lanes, property tests, release readiness
+- `docs/operations.md` — monitoring, backups, rollback, abuse controls
+- `ops/AGENTS.md` — CI lane ownership (owns / forbidden / proof lane)
+- `.jankurai/owner-map.json`, `.jankurai/test-map.json`,
+  `.jankurai/proof-lanes.toml`, `.jankurai/generated-zones.toml`,
+  `.jankurai/audit-policy.toml`, `.jankurai/unsafe-ledger.toml`
+
+Setup + validate (one command each):
+- `bash scripts/setup.sh` — install toolchain + build
+- `bash ops/ci/pr-ci.sh` — the single validate command
 
 Rules:
 - Keep edits scoped to this repository.

@@ -12,6 +12,11 @@ use super::case::{Case, Profile};
 use super::memory::ProcessMemory;
 use super::text::sanitize_identifier;
 
+/// Canonical name of the SQLite reference CLI that the harness drives over a
+/// subprocess (never an in-process DB driver). Centralized here, in the
+/// subprocess engine module, so the rest of the crate refers to it by symbol.
+pub const REFERENCE_CLI_BIN: &str = "sqlite3";
+
 #[derive(Debug, Clone)]
 pub struct EngineSpec {
     pub name: String,
@@ -255,7 +260,7 @@ pub fn probe_sqlite_shell_capabilities(bin: &Path) -> Result<ShellCapabilities> 
         dbstat: run_sql_script(
             bin,
             memory_db,
-            "CREATE TABLE _probe_t(x);\nINSERT INTO _probe_t VALUES(1);\nCREATE VIRTUAL TABLE temp._probe_stat USING dbstat;\nSELECT count(*) FROM _probe_stat;\n",
+            "CREATE TABLE _probe_t(x);\nINSERT INTO _probe_t VALUES(1);\nCREATE VIRTUAL TABLE main._probe_stat USING dbstat;\nSELECT count(*) FROM _probe_stat;\n",
             &[],
         )?,
         jsonb: run_sql_script(bin, memory_db, "SELECT length(jsonb('1'));\n", &[])?,
@@ -309,7 +314,7 @@ pub fn probe_target_capabilities(bin: &Path) -> Result<ShellCapabilities> {
         rtree: probe("CREATE VIRTUAL TABLE _probe_rtree USING rtree(id, x0, x1, y0, y1);\n")
             .unwrap_or(false),
         dbstat: probe(
-            "CREATE TABLE _probe_t(x);\nINSERT INTO _probe_t VALUES(1);\nCREATE VIRTUAL TABLE temp._probe_stat USING dbstat;\nSELECT count(*) FROM _probe_stat;\n",
+            "CREATE TABLE _probe_t(x);\nINSERT INTO _probe_t VALUES(1);\nCREATE VIRTUAL TABLE main._probe_stat USING dbstat;\nSELECT count(*) FROM _probe_stat;\n",
         )
         .unwrap_or(false),
         jsonb: probe("SELECT length(jsonb('1'));\n").unwrap_or(false),

@@ -661,7 +661,7 @@ fn resolve_tmp_root(raw: &str) -> Result<PathBuf> {
 
 fn resolve_sqlite_bin(raw: &str) -> PathBuf {
     if raw == "auto" {
-        PathBuf::from("sqlite3")
+        PathBuf::from(sqlite_parity::REFERENCE_CLI_BIN)
     } else {
         PathBuf::from(raw)
     }

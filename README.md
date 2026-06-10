@@ -67,6 +67,28 @@ It writes JSONL records on stdout/file and exits non-zero if any case fails.
 
 ---
 
+## Develop
+
+Setup and validate are one command each:
+
+```bash
+bash scripts/setup.sh    # install the pinned toolchain, fetch deps, build
+bash ops/ci/pr-ci.sh     # the single validate command (fmt, check, test, package, security)
+```
+
+Other lanes (also runnable via `just`):
+
+```bash
+bash ops/ci/security.sh  # gitleaks + cargo-audit + cargo-deny + zizmor + SBOM
+bash ops/ci/jankurai.sh  # jankurai tool-suite evidence -> target/jankurai/**
+```
+
+Agent-readable docs: [docs/architecture.md](docs/architecture.md),
+[docs/boundaries.md](docs/boundaries.md), [docs/testing.md](docs/testing.md),
+[docs/operations.md](docs/operations.md), and per-cell `ops/AGENTS.md`.
+
+---
+
 ## Run
 
 ```bash

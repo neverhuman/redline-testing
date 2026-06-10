@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 pub use catalog::all_cases;
+pub use engine::REFERENCE_CLI_BIN;
 pub use rql_phase1::{RunConfig as RqlPhase1RunConfig, rql_phase1_cases};
 pub use runner::RunSummary;
 
@@ -30,7 +31,7 @@ pub struct RunConfig {
 
 pub fn run(config: RunConfig) -> Result<RunSummary> {
     let cases = catalog::selected_official_cases()?;
-    let reference = engine::EngineSpec::new("sqlite3", config.reference_bin);
+    let reference = engine::EngineSpec::new(engine::REFERENCE_CLI_BIN, config.reference_bin);
     let target = engine::EngineSpec::new("redlinedb", config.target_bin);
     runner::validate_compare_engines(&reference, &target)?;
     let capabilities = reference.sqlite_shell_capabilities()?;

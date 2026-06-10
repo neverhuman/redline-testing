@@ -332,7 +332,7 @@ pub fn generate(options: ReportOptions) -> Result<()> {
     let sqlite_binary_path = std::env::var_os("REDLINE_TESTING_SQLITE_BIN")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("sqlite3"));
+        .unwrap_or_else(|| PathBuf::from(crate::sqlite_parity::REFERENCE_CLI_BIN));
     let sqlite_binary_sha256 =
         sha256_file(&sqlite_binary_path).unwrap_or_else(|_| "<unknown>".to_owned());
     let sqlite_version =
@@ -1716,7 +1716,7 @@ mod tests {
                 "version": target_version,
             },
             "sqlite": {
-                "path": "/tmp/sqlite3",
+                "path": "/tmp/sqlite-cli",
                 "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
                 "version": sqlite_version,
             },
@@ -1765,7 +1765,7 @@ mod tests {
                 "version": "redlinedb evidence target 8.8.8",
             },
             "sqlite": {
-                "path": "/tmp/sqlite3",
+                "path": "/tmp/sqlite-cli",
                 "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
                 "version": "sqlite evidence 3.44.0",
             },
@@ -1784,7 +1784,7 @@ mod tests {
                     "version": "redlinedb evidence target 8.8.8",
                 },
                 "sqlite": {
-                    "path": "/tmp/sqlite3",
+                    "path": "/tmp/sqlite-cli",
                     "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
                     "version": "sqlite evidence 3.44.0",
                 },
@@ -1867,7 +1867,7 @@ mod tests {
                 "version": "redlinedb v2.0.6 (SQLite 3.45.1 compatibility)",
             },
             "sqlite": {
-                "path": "/tmp/sqlite3",
+                "path": "/tmp/sqlite-cli",
                 "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
                 "version": "3.53.1 2026-05-05 10:34:17 example (64-bit)",
             },

@@ -159,13 +159,28 @@ extra_excluded_paths = [
   # xtask — dev-only code generator, not shipped in the release tarball
   "xtask/",
 
-  # The beyond-SQLite engine and oracle are the adapter + runner pair that
-  # intentionally drive psql; the path-marker detector flags any "psql" /
-  # "postgres" mention as direct-DB-from-wrong-layer. There is no other
-  # layer to push the subprocess invocation into — this IS the boundary.
+  # The sqlite_parity + beyond_sqlite engines are the adapter seam: they
+  # build SQL probe scripts and drive them through subprocess `sqlite3` /
+  # `psql` shells (never an in-process DB driver). The wrong-layer-DB detector
+  # keys on the substrings `select `/`insert `/`sqlite3`/`psql` and has only
+  # `db/`, `migrations/`, and `crates/adapters/` as recognised data layers —
+  # none of which a single-crate CLI harness has. These four files ARE that
+  # data-access boundary; there is no other layer to push the subprocess
+  # invocation into. (rql_phase1.rs lowers SQL text to JSON, so it is dense
+  # with SQL keyword literals for the same reason.)
   "src/beyond_sqlite/engine.rs",
   "src/beyond_sqlite/oracle.rs",
+  "src/sqlite_parity/engine.rs",
+  "src/sqlite_parity/rql_phase1.rs",
 
   # Badge update utility — CI tooling, not product code
   "scripts/update-badge.py",
 ]
+
+# Future-hostile / dead-language marker allowlist. These terms are precise
+# domain vocabulary in a SQLite-parity harness, not throwaway-code markers.
+[dead_language]
+# `temporary` is the sqlparser `CreateTable.temporary` AST field name and the
+# exact SQL keyword for TEMP tables; src/sqlite_parity/rql_phase1.rs guards
+# against them by design (`bail!("temporary tables are outside RQL phase-1")`).
+allow_terms = ["temporary"]
