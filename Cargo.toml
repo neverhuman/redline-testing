@@ -26,3 +26,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 sqlparser = "0.61"
+
+[dev-dependencies]
+# Property/invariant testing for pure transforms (identifier sanitization and
+# other in-crate helpers). See the in-module `prop_tests` under
+# src/sqlite_parity/.
+proptest = "1"

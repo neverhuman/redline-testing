@@ -15,10 +15,11 @@ fi
 
 usage() {
     cat >&2 <<'USAGE'
-usage: scripts/ci-local.sh {pr-ci|security|audit|release|doctor}
+usage: scripts/ci-local.sh {pr-ci|security|jankurai|audit|release|doctor}
 
   pr-ci    run the exact local mirror of the CI validation surface
   security run the repository security lane
+  jankurai run the jankurai tool-suite evidence lane
   audit    run the repository audit lane
   release  run the release packaging lane
   doctor   run the workflow and hook sanity checks
@@ -36,6 +37,9 @@ case "$1" in
         ;;
     security)
         bash "$repo_root/ops/ci/security.sh"
+        ;;
+    jankurai)
+        bash "$repo_root/ops/ci/jankurai.sh"
         ;;
     audit)
         bash "$repo_root/ops/ci/jankurai-audit.sh"

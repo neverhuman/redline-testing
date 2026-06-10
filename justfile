@@ -3,6 +3,10 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 # Default recipe runs the same lane CI runs.
 default: pr-ci
 
+# One-command setup: install/build everything needed to validate.
+setup:
+    bash scripts/setup.sh
+
 # Fast format + compile check (matches the start of pr-ci, no test run).
 check:
     cargo fmt --check
@@ -12,11 +16,28 @@ check:
 test:
     cargo test --locked
 
+# Fast targeted test loop via nextest (narrow per-package runs + caching).
+test-fast:
+    cargo nextest run --workspace --no-fail-fast
+    cargo test -p redline-testing --doc
+
 # Full verification mirror of the primary CI validation pipeline.
 verify: pr-ci
 
 pr-ci:
-    scripts/ci-local.sh pr-ci
+    bash ops/ci/pr-ci.sh
+
+# Security lane: gitleaks + cargo-audit + cargo-deny + zizmor + SBOM.
+security:
+    bash ops/ci/security.sh
+
+# Jankurai tool-suite evidence lane (artifacts under target/jankurai/**).
+jankurai:
+    bash ops/ci/jankurai.sh
+
+# Run the jankurai audit and refresh the local score.
+score:
+    jankurai audit . --mode advisory --json .jankurai/repo-score.json --md .jankurai/repo-score.md
 
 # Build + package the release tarball + manifest. Refactored to invoke
 # scripts/release-package.sh so the artifact_hashes set is glob-driven (every

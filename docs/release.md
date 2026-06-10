@@ -55,6 +55,26 @@ gh attestation verify redline-testing-<version>-linux-x86_64.tar.gz \
   --repo neverhuman/redline-testing
 ```
 
+## Launch-gate readiness
+
+Before a release tag is published, the launch gate proves every control is in
+place (see also [`docs/operations.md`](operations.md) and
+[`docs/testing.md`](testing.md)):
+
+- **security**: `bash ops/ci/security.sh` runs gitleaks, `cargo audit`,
+  `cargo deny`, zizmor, and an SBOM; the CI `security` job is blocking.
+- **provenance / integrity**: every artifact is SHA-256 hashed in
+  `release-manifest.json` and the tarball carries a Sigstore/SLSA build
+  **provenance** attestation.
+- **backup**: the content-addressed tarball + `.sha256` sidecar + manifest are
+  the immutable **backups** of every shipped artifact; old tags never move.
+- **monitoring**: the `release_manifest_integrity` test plus RedlineDB CI
+  provide drift **monitoring** against the published corpus.
+- **rollback**: ship a higher version that restores prior behavior (below).
+- **abuse / rate limit**: the runner only drives allowlisted local subprocess
+  shells with bounded timeouts and accepts no untrusted network input, so there
+  is no abuse / rate-limit surface to throttle.
+
 ## Rollback
 
 A release tag is immutable. To "roll back" we ship a follow-up release with a
