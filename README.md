@@ -1,3 +1,5 @@
+> **Superseded:** source, development, CI and new releases have moved to [neverhuman/RedlineDB](https://github.com/neverhuman/RedlineDB). This component is included [in the complete checkout](https://github.com/neverhuman/RedlineDB/tree/main/subrepos/redline-testing). Historical commits, tags, assets and consumer proof records are retained.
+
 # redline-testing
 
 Primary CI runs in GitLab via [.gitlab-ci.yml](.gitlab-ci.yml).
