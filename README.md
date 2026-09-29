@@ -1,4 +1,4 @@
-> **Superseded:** source, development, CI and new releases have moved to [neverhuman/RedlineDB](https://github.com/neverhuman/RedlineDB). This component is included [in the complete checkout](https://github.com/neverhuman/RedlineDB/tree/main/subrepos/redline-testing). Historical commits, tags, assets and consumer proof records are retained.
+> **Superseded:** RedlineDB is developed in one repository, [neverhuman/redline](https://github.com/neverhuman/redline); it lives in `subrepos/redline-testing` there ([link](https://github.com/neverhuman/redline/tree/main/subrepos/redline-testing)). This repository is archived and read-only; its history, tags and assets are kept for reference.
 
 # redline-testing
 
